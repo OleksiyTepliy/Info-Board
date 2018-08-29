@@ -121,7 +121,7 @@ void process_command(void)
 				clock.mm = time % 100;
 				time /= 100;
 				clock.hh = time;
-				uart_send("OK");	/* check logic */
+				uart_send("OK");	/* rewrite logic */
 			}
 			else {
 				uart_send("wrong argument");
@@ -143,55 +143,4 @@ void process_command(void)
 		}
 	}
 }
-
-
-
-// void Process_Command(char * command) {
-// 	char cmd[64];
-// 	char args[64];
-// 	int32_t argi;
-// 	uint8_t parsed = sscanf(command, "%s %s", cmd, args);
-// 	if (parsed == 2) {
-// 		if (strcmp(cmd, "adc") == 0) {
-// 			if (strcmp(args, "temp") == 0) {
-// 				sprintf((char *) tx, "temp=%d\r\n", adc_buf[1]);
-// 			} else if (strcmp(args, "photores") == 0) {
-// 				sprintf((char *) tx, "photores=%d\r\n", adc_buf[0]);
-// 			} else if (strcmp(args, "all") == 0) {
-// 				sprintf((char *) tx, "photores=%d, temp=%d\r\n", adc_buf[0], adc_buf[1]);
-// 			} else {
-// 				sprintf((char *) tx, "unknown argument\r\n");
-// 			}
-// 		} else if (strcmp(cmd, "led") == 0) {
-// 			if (strcmp(args, "on") == 0) {
-// 				ledPWM = 100;
-// 				sprintf((char *) tx, "OK\r\n");
-// 			} else if (strcmp(args, "off") == 0) {
-// 				ledPWM = 0;
-// 				sprintf((char *) tx, "OK\r\n");
-// 			} else if (isdigit(args[0])) {
-// 				argi = strtol(args, (char *) NULL, 10);
-// 				if (argi >= 0 && argi <= 100) {
-// 					ledPWM = argi;
-// 					sprintf((char *) tx, "OK\r\n");
-// 				} else {
-// 					sprintf((char *) tx, "argument out of bounds\r\n");
-// 				}
-// 			} else {
-// 				sprintf((char *) tx, "unknown argument\r\n");
-// 			}
-// 		} else {
-// 			sprintf((char *) tx, "command unknown\r\n");
-// 		}
-// 	} else if (parsed == 1 && strcmp(cmd, "clear") == 0) {
-// 		LCD_FillScreen(BLACK);
-// 		LCD_SetCursor(0, 0);
-// 		sprintf((char *) tx, "OK\r\n");
-// 	} else {
-// 		sprintf((char *) tx, "command unknown\r\n");
-// 	}
-// 	HAL_UART_Transmit(&huart4, tx, strlen((char *) tx), 100);
-// 	LCD_Printf("<< %s", tx);
-// }
-
 
