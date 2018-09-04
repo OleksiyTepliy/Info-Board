@@ -17,7 +17,7 @@ https://github.com/OleksiyTepliy
 This project is licensed under the MIT License.
 
 #### Acknowledgments
-* Inspiration by GL BaseCamp :)
+Inspiration by GL BaseCamp :)
 
 #### Video example
 https://www.youtube.com/watch?v=CKmDqCWHyB8&feature=youtu.be
