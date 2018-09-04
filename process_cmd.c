@@ -119,7 +119,7 @@ void process_command(void)
 
 	} else if (parsed == 2) {
 		if (strcmp((char *) cmd, "ul") == 0) {
-			strcpy((char *) eeprom_update_buff, args);
+			strcpy((char *) eeprom_update_buff, (Rx_buff + 3));
 			uart_send((char *) eeprom_update_buff);
 			flags[U_EEPROM] = true;
 			uart_send("OK");
