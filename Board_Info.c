@@ -4,21 +4,24 @@
 #include <util/atomic.h>
 #include <avr/eeprom.h>
 #include <stdint.h>
+#include <stdio.h> /************************************************************************************/
 #include <stdbool.h>
-#include "spi/spi.h"
-#include "fronts/front.h"
-#include "MAX7219/MAX7219.h"
-#include "uart/uart.h"
-#include "process_cmd/process_cmd.h"
-#include "adc/adc.h"
+#include "spi.h"
+#include "front.h"
+#include "MAX7219.h"
+#include "uart.h"
+#include "process_cmd.h"
+#include "adc.h"
 
 volatile uint16_t timer = 0; // time counter
 volatile bool flags[U_SIZE] = {0};
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
-volatile uint8_t temp = 0;
-volatile enum display_modes show_mode = STRING; //= STRING;
+volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
+volatile uint8_t constant_brightness = 0;
+volatile enum display_modes show_mode = STRING;
+volatile enum brightness_modes br_mode = AUTO;
 
 volatile struct rtc clock = {
 	.hh = 0,
@@ -31,8 +34,8 @@ volatile struct rtc clock = {
 volatile struct timings tm = { 
 	.rtc = 10U, // 100 ms
 	.screen = 4U, // 40 ms
-	.temp = 3000U, // 3sec
-	.photo = 5000U // 500 - 5 sec,
+	.temp = 300U, // 3sec
+	.photo = 500U // 5 sec,
 };
 
 /**
@@ -47,7 +50,7 @@ static void u_rtc(void);
 static void u_screen(enum display_modes flag);
 
 /**
- * u_time - updates time on display.
+ * u_time - updates time on display according to the mode flag.
  * @left: hours or minutes
  * @right: minutes or seconds
  */
@@ -58,6 +61,12 @@ static void u_time(uint8_t left, uint8_t right);
  * @t: temperature.
  */
 static void u_temp(uint8_t t);
+
+/**
+ * u_photo - adjust brightness of the panel.
+ * 
+ */
+static void u_photo(void);
 
 
 int main(void)
@@ -78,7 +87,7 @@ int main(void)
 	DDRB |= 1 << DDB0; // pin 8 
 	PORTB &= ~(1 << DDB0); // logic 0.
 
-	//eeprom_write_word (&eeprom_buff_size, 25);
+
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
 	
@@ -86,7 +95,7 @@ int main(void)
 	uint8_t message[MAX_MESSAGE_ARR_SIZE];
 
 	/* read eeprom buffer message */
-	eeprom_read_block (&message, &eeprom_buff, size);
+	eeprom_read_block (&message, &eeprom_buff, size);	
 	message[size] = '\0';
 	concat(message, size);
 
@@ -103,7 +112,7 @@ int main(void)
 	/* We shift this pointer, and update panels state via update_screen routine */
 	uint8_t *screen_buff = main_buff;
 
-	/* last index of main_buff array minus sizeof screen_buff */
+	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
 	/* set prescaler to 256 and start timer */
@@ -130,26 +139,19 @@ int main(void)
 		}
 
 		if (flags[U_TEMP]) {
-			// adc start temp
+			/********** ONEWIRE START TEMP **********/
 			flags[U_TEMP] = false;
 		}
 
 		if (flags[U_PHOTO]) {
-			if (temp < 2) {
-				uint8_t buffer[10];
-				sprintf(buffer, "0x%04hx\n", temp);
-				//uart_send(buffer);
-				max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, 0x01);
-			} else {
-				max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, 0x15);
-			}
+			u_photo();
 			flags[U_PHOTO] = false;
 		}
 
 		if (flags[U_UART]) {
 			process_command();
 			flags[U_UART] = false;
-			/* after process finished, enable reciver and rx interrupts */
+			/* after command process finished, enable reciver and rx interrupts */
 			UCSR0B |= (1 << RXEN0) | (1 << RXCIE0);
 		}
 
@@ -160,10 +162,13 @@ int main(void)
 			/* No interrupts can occur while this block is executed */
 			TCCR1B &= ~(1 << CS11); // turn off timer
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
+				/* write new message to eeprom buff */
 				eeprom_write_block(&eeprom_update_buff, &eeprom_buff, new_size);
+				/* write size of the new message to eeprom */
 				eeprom_write_word (&eeprom_buff_size, new_size);
-				//new_size = eeprom_read_word (&eeprom_buff_size);
+
 				eeprom_read_block (&message, &eeprom_buff, new_size);
 				message[new_size] = '\0';
 				concat(message, new_size);
@@ -193,7 +198,8 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK)
 	if (timer % tm.temp == 0)
 		flags[U_TEMP] = true;
 	if (timer % tm.photo == 0) {
-		ADCSRA |= (1 << ADSC); // start conversion
+		if (br_mode == AUTO)
+			ADCSRA |= (1 << ADSC); // start photo conversion
 	}
 }
 
@@ -222,7 +228,6 @@ static void u_screen(enum display_modes flag)
 		uint8_t hh = clock.hh;
 		uint8_t mm = clock.mm;
 		u_time(hh, mm);
-
 	} else if (flag == CLOCK_SS) {
 		uint8_t mm = clock.mm;
 		uint8_t ss = clock.ss;
@@ -266,4 +271,20 @@ static void u_temp(uint8_t t)
 	}
 	max7219_send_char_to(3, num);
 	max7219_clear_panels(2);
+}
+
+
+static void u_photo(void)
+{
+	uint16_t ph = 0;
+	for (uint8_t i = 0; i < PHOTO_MEASURE_SAMPLES; i++)
+		ph += photo_avg[i];
+	ph /= PHOTO_MEASURE_SAMPLES;
+	/************************************************************************************/
+	// char photo[20];
+	// sprintf(photo, "photo = %u\n", ph / 17);
+	// uart_send(photo);
+	/************************************************************************************/
+	/* 255 / 17 == 15, 0 - 15 are all possible intensity levels */
+	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, ph / 17);
 }

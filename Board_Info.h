@@ -8,13 +8,17 @@
 #define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
 #endif
 
-#define OFFSET 32 // 32 - offset of ascii array
+#define OFFSET 32U // 32 - offset of ascii array
 
 /* max number of characters in message */
-#define MAX_MESSAGE_LEN 50
+#define MAX_MESSAGE_LEN 50U
 
 /* LED_NUM * 2 - padding spaces + one '\0' string terminator */
-#define MAX_MESSAGE_ARR_SIZE MAX_MESSAGE_LEN + (LED_NUM << 1) + 1
+#define MAX_MESSAGE_ARR_SIZE (MAX_MESSAGE_LEN + ((LED_NUM) << 1) + 1)
+
+/* how many times to measure resistor before brightness adjustment */
+/* measuring interval can be set in timings struct */
+#define PHOTO_MEASURE_SAMPLES 5U
 
 
 /* event flags */
@@ -34,17 +38,25 @@ enum display_modes {
 	CLOCK_HH = 0,
 	CLOCK_SS,
 	STRING,
-    	TEMP,
+	TEMP,
 	TEST,
 	CANDLE
 };
+
+
+/* brightness modes */
+enum brightness_modes {
+	AUTO = 0,
+	STATIC
+};
+
 
 /* default timings divided by 10, because timer interrupt rise every 10 ms */
 struct timings {
 	uint16_t rtc;   // 100 ms
 	uint16_t screen; // 10 - 50 ms
 	uint16_t temp; // 1 sec - 10sec
-	uint16_t photo; // 3sec - 60sec
+	uint16_t photo; // 3sec - 60sec	
 };
 
 

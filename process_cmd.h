@@ -1,4 +1,4 @@
-
+#define CMD_NUM 10
 
 /**
  * strsize - returns length of array string

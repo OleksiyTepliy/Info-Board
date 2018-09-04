@@ -13,7 +13,6 @@ volatile uint8_t tx_idx; // Tx_buff index
 extern volatile bool flags[U_SIZE];
 extern volatile bool tx_flag;
 
-
 void uart_init(void)
 {
 	PRR &= ~(1 << PRUSART0); // USART enable
@@ -64,13 +63,14 @@ ISR(USART_RX_vect, ISR_BLOCK)
 void uart_send(char *arr)
 {
 	/* copy data array to Tx_buffer */
-	while(tx_flag); // wait end of previouse transmitition
+	while(tx_flag); // waiting until the end of the previous transmission
 
 	uint16_t i;
-	for (i = 0; arr[i] /* &&  i < MAX_MESSAGE_LEN - 2 */; i++)
+	for (i = 0; arr[i]; i++) {
 		Tx_buff[i] = arr[i];
-	Tx_buff[i] = '\n';
-	Tx_buff[++i] = '\0';
+	}
+	Tx_buff[i++] = '\n';
+	Tx_buff[i] = '\0';
 
 	/* other bytes will be sent in interrupt */
 	tx_idx = 0;
@@ -79,8 +79,19 @@ void uart_send(char *arr)
 	/* set flag */
 	tx_flag = true;
 	/* Enable transmitter and UDRE interrupts */
-	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0); // UDRE interrupt will be executed immediately	
+	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0); // UDRE interrupt will be executed immediately
 }
+
+// void uart_send_byte(char byte)
+// {
+// 	while(tx_flag);
+// 	tx_idx = 0;
+// 	Tx_buff[0] = '\n';
+// 	Tx_buff[1] = '\0';
+// 	UDR0 = byte;
+// 	tx_flag = true;
+// 	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0);
+// }
 
 /* test func */
 // void uart_send(uint8_t *data)
@@ -113,48 +124,4 @@ ISR(USART_UDRE_vect, ISR_BLOCK)
 	/* if all data has been sent need to disable this interrupt */
 	UCSR0B &= ~(1 << UDRIE0);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	/* UART RECIVE , WRITE TO EEPROM */
-	// uint8_t recieved_message[MAX_MESSAGE_LEN] = "Good News Everyone!"; // default message
-	// uint16_t mess_len = strsize(recieved_message);
-
-	// if (mess_len > MAX_MESSAGE_LEN) {
-	// 	// UART TRANSMIT SIZE ERROR
-	// }
-	// else {
-	// 	/* we adding 4 spaces to head and tail for better readability */
-	// 	/* concatenate new array with spaces */
-	// 	concat(' ', recieved_message, mess_len);
-	// 	mess_len += (LED_NUM << 1) + 1;
-	// 	/* make a copy to EEPROM memory */
-	// 	eeprom_write_block (&recieved_message, &eeprom_buff, mess_len);
-		
-	// }
-	/* UART RECIVE , WRITE TO EEPROM */
 

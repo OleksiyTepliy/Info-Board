@@ -1,15 +1,14 @@
-
 TARGET:=Board_Info
-DEPS:=spi MAX7219 uart process_cmd adc
+DEPS:= MAX7219 process_cmd spi uart adc
 MCU:=atmega328p
-PROGPORT:=/dev/ttyACM0
+PROGPORT:=/dev/ttyUSB0
 
 CC=avr-gcc
 CFLAGS=-mmcu=$(MCU) -Os -Wall -Wextra -Wpedantic -Waddr-space-convert -Wmisspelled-isr #-Werror  -save-temps
 SIZE:=avr-size --format=avr --mcu=$(MCU)
 OBJCOPY:=avr-objcopy -j .text -j .data -O ihex
-AVRDUDE:=avrdude
 
+AVRDUDE:=avrdude
 .PHONY: help all clean flash hex
 
 help:				## display this message

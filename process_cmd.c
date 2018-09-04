@@ -14,25 +14,27 @@ extern volatile bool flags[U_SIZE];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
 extern volatile struct timings tm;
 extern volatile struct rtc clock;
+extern volatile enum brightness_modes br_mode;
 
 extern uint8_t Rx_buff[]; // UART - receive data buffer
 volatile bool tx_flag = false;
 
 
-/* 9 commands */
-//uint8_t *commands[] = {"help", "test", "sh", "sm", "stp", "sl", "ut", "us", "ul"};
+/* 10 commands */
+//uint8_t *commands[] = {"sh", "sm", "stp", "sl", "ut", "ub", "us", "ul", "help", "test"};
 
-/* array that stores help message */
-char cmd_desc[] = {
-	"help - shows all commands\n"
-	"test - lights all panels\n"
-	"sh - clock hh : mm\n"
-	"sm - clock mm : ss\n"
-	"stp - temperature mode\n"
-	"sl - message mode\n"
-	"ut - update time. ut [hhmmss]\n"
-	"us - update line speed. us [1 - 10]\n"
-	"ul - update message. us [message]"
+/* help message */
+char *help[CMD_NUM] = {
+	"sh - clock hh : mm",
+	"ss - clock mm : ss",
+	"stp - temperature mode",
+	"sl - line mode",
+	"ut - update time. ut [hh mm ss]",
+	"ub - update brightness. ub [auto] or [0-15]",
+	"us - update line speed. us [1-10]",
+	"ul - update message. ul [message]",
+	"test - lights all panels",
+	"help - shows all commands"
 };
 
 
@@ -61,19 +63,25 @@ void concat(uint8_t *arr, uint16_t arr_size)
 	strcpy((char *) arr, (char *) buff);
 }
 
+static void error(void)
+{	
+	uart_send("WRONG COMMAND, to much input");
+	return;
+}
+
 
 void process_command(void)
 {
 	char cmd[20];
 	char args[MAX_MESSAGE_LEN];
 	char wrong_cmd[] = "WRONG COMMAND";
-	uint8_t parsed = 1;
+	char wrong_arg[] = "WRONG ARGUMENT";
+	uint8_t parsed;
 
-	if (Rx_buff[2] == ' ') {
-		strcpy(cmd, (char *) Rx_buff);
-		cmd[2] = '\0';
-		strcpy(args, (char *) Rx_buff + 2);
-		parsed = 2;
+	parsed = sscanf((char *) Rx_buff, "%s %s", cmd, args);
+	/* command 2 characters + space + '\0' are extra 4 characters to the input */
+	if (strlen((char *) Rx_buff) > MAX_MESSAGE_LEN + 4) {
+		error();
 	}
 
 	if (parsed == 1) {
@@ -96,7 +104,9 @@ void process_command(void)
 			// test panels
 			uart_send("TEST");
 		} else if (!strcmp((char *) Rx_buff, "help")) {
-			uart_send(cmd_desc);
+			for (uint8_t i = 0; i < CMD_NUM; i++) {
+				uart_send(&help[i][0]);
+			}
 		} else if (!strcmp((char *) Rx_buff, "ledon")) {
 			PORTB |= (1 << DDB0);
 			uart_send("ON");
@@ -124,18 +134,32 @@ void process_command(void)
 				uart_send("OK");	/* rewrite logic */
 			}
 			else {
-				uart_send("wrong argument");
-				uart_send("example ut 123500");
+				uart_send(wrong_arg);
+				uart_send("example ut 122500");
 			}
 		} else if (!strcmp(cmd, "us")) {
 			uint8_t tmp = atoi(args);
-			if (tmp == 0 || tmp > 10) {
-				uart_send("wrong argument");
+			if (tmp < 1 || tmp > 10) {
+				uart_send(wrong_arg);
 				uart_send("accept 1 - 10");
 			}
 			else {
 				tm.screen = tmp;
 				uart_send("OK");
+			}
+		} else if (!strcmp(cmd, "ub")) {
+			if (!strcmp(args, "auto")) {
+				br_mode = AUTO;
+			}
+			else {
+				uint8_t tmp = atoi(args);
+				if (tmp > 15) {
+					uart_send(wrong_arg);
+				}
+				else {
+					br_mode = STATIC;
+					max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, tmp);
+				}
 			}
 		}
 		else {
