@@ -1,6 +1,6 @@
 # Info Board Project
 This is an information panel project.
-The panel I used is a 4 element LED matrix, controlled by the MAX7219.
+The panel I used consists of fours LED matrices, each of is controlled by the serially interfaced led driver MAX7219.
 The panel has several information display modes.
 1) The clock in format hours: minutes.
 2) The clock in format minutes: seconds.
