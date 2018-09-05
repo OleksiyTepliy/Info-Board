@@ -1,10 +1,21 @@
 #define CMD_NUM 10
 
+
+/* error flags */
+enum errs {
+    E_OK,
+    E_CMD,
+    E_ARG,
+    E_SIZE,
+};
+
+
 /**
  * strsize - returns length of array string
  * @arr: data array
  */
 uint16_t strsize(uint8_t *arr);
+
 
 /**
  * str_to_arr_trans - this function takes a string message as input, forms 
@@ -25,6 +36,7 @@ void str_to_arr_trans(uint8_t *message, uint16_t message_len, uint8_t *arr,
  * 
  */
 void concat(uint8_t *arr, uint16_t arr_size);
+
 
 /**
  * process command - process UART commands

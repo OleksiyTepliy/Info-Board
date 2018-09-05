@@ -63,89 +63,73 @@ void concat(uint8_t *arr, uint16_t arr_size)
 	strcpy((char *) arr, (char *) buff);
 }
 
-static void error(void)
-{	
-	uart_send("WRONG COMMAND, to much input");
-	return;
-}
-
 
 void process_command(void)
 {
-	char cmd[20];
-	char args[MAX_MESSAGE_LEN];
-	char wrong_cmd[] = "WRONG COMMAND";
-	char wrong_arg[] = "WRONG ARGUMENT";
-	uint8_t parsed;
+	enum errs err = E_OK;
+	char *errors[] = {
+		"OK",
+		"WRONG_COMMAND",
+		"WRONG_ARGUMENT",
+		"TO MUCH INPUT",
+	};
 
-	parsed = sscanf((char *) Rx_buff, "%s %s", cmd, args);
 	/* command 2 characters + space + '\0' are extra 4 characters to the input */
 	if (strlen((char *) Rx_buff) > MAX_MESSAGE_LEN + 4) {
-		error();
+		err = E_SIZE;
+		uart_send(errors[E_SIZE]);
+		return;
 	}
+
+	char cmd[10] = {'\0'};
+	char args[MAX_MESSAGE_LEN] = {'\0'};
+
+	uint8_t parsed = sscanf((char *) Rx_buff, "%s %s", cmd, args);
 
 	if (parsed == 1) {
 		if (!strcmp((char *) Rx_buff, "sl")) {
 			show_mode = STRING;
-			uart_send("OK");
 		} else if (!strcmp((char *) Rx_buff, "sh")) {
-			// show hh
 			show_mode = CLOCK_HH;
-			uart_send("OK");
 		} else if (!strcmp((char *) Rx_buff, "ss")) {
-			// show mm
 			show_mode = CLOCK_SS;
-			uart_send("OK");
 		} else if (!strcmp((char *) Rx_buff, "stp")) {
-			// show temp
 			show_mode = TEMP;
-			uart_send("OK");
 		} else if (!strcmp((char *) Rx_buff, "test")) {
 			// test panels
-			uart_send("TEST");
 		} else if (!strcmp((char *) Rx_buff, "help")) {
 			for (uint8_t i = 0; i < CMD_NUM; i++) {
 				uart_send(&help[i][0]);
 			}
-		} else if (!strcmp((char *) Rx_buff, "ledon")) {
-			PORTB |= (1 << DDB0);
-			uart_send("ON");
-		} else if (!strcmp((char *) Rx_buff, "ledoff")) {
-			PORTB &= ~(1 << DDB0);
-			uart_send("OFF");
 		} else {
-			uart_send(wrong_cmd);
+			err = E_CMD;
 		}
-
 	} else if (parsed == 2) {
 		if (strcmp((char *) cmd, "ul") == 0) {
-			strcpy((char *) eeprom_update_buff, (Rx_buff + 3));
+			strcpy((char *) eeprom_update_buff, (char *) (Rx_buff + 3));
 			uart_send((char *) eeprom_update_buff);
 			flags[U_EEPROM] = true;
-			uart_send("OK");
 		} else if (strcmp(cmd, "ut") == 0) {
-			uint32_t time = atol(args);
-			if (time < 235959) {
+			uint32_t time;
+			if (strlen(args) > 6 || (time = atol(args)) > 235959) {
+				err = E_ARG;
+				uart_send("example: ut 123000, sets time to 12:30:00");
+			}
+			else {					/* rewrite logic */					
 				clock.ss = time % 100;
 				time /= 100;
 				clock.mm = time % 100;
 				time /= 100;
-				clock.hh = time;
-				uart_send("OK");	/* rewrite logic */
-			}
-			else {
-				uart_send(wrong_arg);
-				uart_send("example ut 122500");
+				clock.hh = time;		
 			}
 		} else if (!strcmp(cmd, "us")) {
 			uint8_t tmp = atoi(args);
 			if (tmp < 1 || tmp > 10) {
-				uart_send(wrong_arg);
+				err = E_ARG;
 				uart_send("accept 1 - 10");
 			}
 			else {
 				tm.screen = tmp;
-				uart_send("OK");
 			}
 		} else if (!strcmp(cmd, "ub")) {
 			if (!strcmp(args, "auto")) {
@@ -154,7 +138,7 @@ void process_command(void)
 			else {
 				uint8_t tmp = atoi(args);
 				if (tmp > 15) {
-					uart_send(wrong_arg);
+					err = E_ARG;
 				}
 				else {
 					br_mode = STATIC;
@@ -163,8 +147,9 @@ void process_command(void)
 			}
 		}
 		else {
-			uart_send(wrong_cmd);
+			err = E_CMD;
 		}
 	}
+	uart_send(errors[err]);
 }
 
