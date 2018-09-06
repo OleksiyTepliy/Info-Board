@@ -20,6 +20,6 @@ This project is licensed under the MIT License.
 Inspiration by GL BaseCamp :)
 
 #### Video example
-https://www.youtube.com/watch?v=CKmDqCWHyB8&feature=youtu.be
+https://www.facebook.com/GlobalLogicUkraine/videos/685107631866852/
 
 
