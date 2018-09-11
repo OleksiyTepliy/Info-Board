@@ -1,5 +1,5 @@
 TARGET:=Board_Info
-DEPS:= MAX7219 process_cmd spi uart adc
+DEPS:= MAX7219 process_cmd spi uart adc i2c
 MCU:=atmega328p
 PROGPORT:=/dev/ttyUSB0
 
