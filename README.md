@@ -1,5 +1,5 @@
 # Info Board Project
-This is an information panel project. BARE METAL Atmega328p.
+This is an information panel project. This is a BARE METAL project utilized on Atmega328p.
 The panel I used consists of fours LED matrices, each of is controlled by the serially interfaced led driver MAX7219.
 The panel has several information display modes.
 1) The clock in format hours: minutes.
