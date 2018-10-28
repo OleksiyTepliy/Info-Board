@@ -73,6 +73,7 @@ int main(void)
 {
 	SPI_MasterInit(); // pin 10 CS, pin 11 MOSI, pin 13 SCLK
 	uart_init();
+	i2c_init();
 	max7219_Init();
 	max7219_clear_panels(ALL);
 	adc_init();
@@ -122,6 +123,10 @@ int main(void)
 
 		if (flags[U_RTC]) {
 			u_rtc();
+			uint8_t data[] = {0x8F, 0x12};
+			i2c_send(0x68, 0x06, data, sizeof(data));
+			//#include "i2c.h"
+			//START;
 			flags[U_RTC] = false;
 		}
 
