@@ -5,27 +5,12 @@
 #include "i2c.h"
 #include "uart.h"
 
-
-#define ACK (TWCR |= (1 << TWEA))
-#define NACK (TWCR &= ~(1 << TWEA))
-#define START (TWCR |= ((1 << TWINT) | (1 << TWSTA)))
-#define DIS_START (TWCR &= ~(1 << TWSTA))
-#define STOP (TWCR |= (1 << TWSTO))
-#define CLEAR_TWINT (TWCR |= (1 << TWINT))
-
-
-
-/***********************************************
-Transmission Modes
-The TWI can operate in one of four major modes:
-• Master Transmitter (MT)
-• Master Receiver (MR)
-• Slave Transmitter (ST)
-• Slave Receiver (SR)
-***********************************************/
-
-/* in our case MT and MR will be used */
-
+uint8_t dev_adress;
+uint8_t dev_register;
+const uint8_t *data_buff;
+uint16_t data_len;
+enum i2c_mode I2C_MODE;
+volatile uint16_t data_idx = 0;
 
 void i2c_init()
 {
@@ -43,58 +28,76 @@ void i2c_init()
 	power_twi_enable();
 	/* SCLK = 16Mhz / (16 + 2 * (TWBR) * (Prescaler)) */
 	TWBR = 0x0C; // SCL - 400kHz
-	TWCR |= (1 << TWEN) | (1 << TWIE); // eneble TWI and TWI interrupt
+	TWCR |= (1 << TWEN) | (1 << TWIE); // enable TWI module and TWI interrupts
 }
 
-// ds1307 slave address 1101000  (if read + 0x01 if write  + 0x00)
-
-
-void i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t *data, uint16_t size)
+void i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size)
 {
-	uint8_t write = (dev_addr << 1);
-
-	START; // start condition
+	dev_adress = dev_addr << 1;
+	dev_register = dev_mem_addr;
+	data_buff = data;
+	data_len = size;
+	data_idx = 0;
+	I2C_MODE = MT;
+	START;
 }
 
-void i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t *data, uint16_t size)
+void i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size)
 {
-
+	dev_adress = dev_addr << 1 | 0x01;
+	dev_register = dev_mem_addr;
+	data_buff = data;
+	data_len = size;
+	data_idx = 0;
+	I2C_MODE = MR;
+	START;
 }
 
-char info[20] = {'\0'};
-uint8_t ds1307_addr = 0x68;
-
+//uint8_t ds1307_addr = 0x68;
 
 // Two-wire Serial Interface Interrupt
 ISR(TWI_vect, ISR_BLOCK)
 {
-	uint8_t read = (ds1307_addr << 1) | 0x01;
-	uint8_t write = (ds1307_addr << 1);
-
-	static uint8_t num = 0;
-
-	/* WRITE TO REGISTER */
-	if (num == 0) {
-		TWDR = write; // address + write flag
-		DIS_START; // stop start 
-		CLEAR_TWINT; // clear interrupt flag, immideatly will activate TWI and send data.
+	switch(TWSR) {
+		case START_TRANSMITTED: {
+			TWDR = dev_adress;
+			DIS_START;
+			CLEAR_TWINT;
+		} break;
+		case MT_SLA_W_TRANSMITTED_RECEIVED_ACK: {
+			TWDR = dev_register;
+			CLEAR_TWINT;
+		} break;
+		case MR_SLA_R_TRANSMITTED_RECEIVED_ACK: {
+			START;
+		} break;
+		case REPEATED_START_TRANSMITTED: {
+			TWDR = dev_register; // register to read
+			DIS_START; // stop start
+			CLEAR_TWINT;
+		} break;
+		case MR_DATA_RECIVED_RECEIVED_ACK: {
+			uint8_t info = TWDR;
+			ACK; // ACK
+			CLEAR_TWINT;
+		} break;
+		case MT_DATA_TRANSMITTED_RECEIVED_ACK: {
+			if (data_idx < data_len) {
+				TWDR = data_buff[data_idx++];
+				CLEAR_TWINT;
+			}
+			else {
+				STOP;
+				CLEAR_TWINT;
+			}
+		} break;
+		default: {
+			//CLEAR_TWINT;
+		}
 	}
-	if (num == 1) {
-		TWDR = 0x06; // register to write
-		CLEAR_TWINT;
-	}
-	if (num == 2) {
-		TWDR = 0x12; // address + read flag
-		CLEAR_TWINT;
-	}
-	if (num == 3) {
-		STOP; // stop condition
-		CLEAR_TWINT;
-	}
-	/* WRITE TO REGISTER */ 	/********************************/
 
-
-	/* READ FROM REGISTER */ 	/********************************/
+/*
+	// READ FROM REGISTER
 	if (num == 4) {
 		TWDR = write; // address + write flag
 		DIS_START; // stop start 
@@ -141,6 +144,7 @@ ISR(TWI_vect, ISR_BLOCK)
 		num = 0;
 	}
 
-	/* READ FROM REGISTER */
-	num++;
+	// READ FROM REGISTER 
+*/
+	//num++;
 }
