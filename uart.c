@@ -8,6 +8,7 @@
 
 uint8_t Rx_buff[128]; // UART - receive data buffer
 uint8_t Tx_buff[128]; // UART - transmit data buffer
+static uint16_t data_len = 0;
 volatile uint8_t rx_idx; // Rx_buff index
 volatile uint8_t tx_idx; // Tx_buff index
 extern volatile bool flags[U_SIZE];
@@ -82,6 +83,19 @@ void uart_send(char *arr)
 	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0); // UDRE interrupt will be executed immediately
 }
 
+void uart_tx(uint8_t *data, uint16_t size)
+{
+	while(tx_flag);
+	memcpy(Tx_buff, data, size);
+
+	tx_idx = 0;
+	UDR0 = Tx_buff[tx_idx];
+	tx_idx++;
+
+	tx_flag = true;
+	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0);
+}
+
 // void uart_send_byte(char byte)
 // {
 // 	while(tx_flag);
@@ -121,6 +135,10 @@ ISR(USART_UDRE_vect, ISR_BLOCK)
 		UDR0 = Tx_buff[tx_idx++]; 
 		return;
 	}
+	// if (tx_idx < data_len) {
+	// 	UDR0 = Tx_buff[tx_idx++];
+	// 	return;
+	// }
 	/* if all data has been sent need to disable this interrupt */
 	UCSR0B &= ~(1 << UDRIE0);
 }

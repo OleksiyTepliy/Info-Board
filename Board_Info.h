@@ -46,8 +46,23 @@ enum display_modes {
 
 /* brightness modes */
 enum brightness_modes {
-	AUTO = 0,
-	STATIC
+	BR_0 = 0,
+	BR_1,
+	BR_2,
+	BR_3,
+	BR_4,
+	BR_5,
+	BR_6,
+	BR_7,
+	BR_8,
+	BR_9,
+	BR_10,
+	BR_11,
+	BR_12,
+	BR_13,
+	BR_14,
+	BR_15,
+	AUTO
 };
 
 

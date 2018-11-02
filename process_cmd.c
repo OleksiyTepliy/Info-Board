@@ -8,6 +8,7 @@
 #include "uart.h"
 #include "Board_Info.h"
 #include "MAX7219.h"
+#include "DS1307.h"
 
 extern volatile enum display_modes show_mode;
 extern volatile bool flags[U_SIZE];
@@ -115,12 +116,12 @@ void process_command(void)
 				err = E_ARG;
 				uart_send("example: ut 123000, sets time to 12:30:00");
 			}
-			else {					/* rewrite logic */					
-				clock.ss = time % 100;
+			else {					
+				/* rewrite logic ATOMIC BLOCK RESTORATE */					
+				ds1307_set_seconds(time % 100);
 				time /= 100;
-				clock.mm = time % 100;
-				time /= 100;
-				clock.hh = time;		
+				ds1307_set_minutes(time % 100);
+				ds1307_set_hours(time /= 100);		
 			}
 		} else if (!strcmp(cmd, "us")) {
 			uint8_t tmp = atoi(args);
@@ -141,7 +142,7 @@ void process_command(void)
 					err = E_ARG;
 				}
 				else {
-					br_mode = STATIC;
+					br_mode = BR_0;
 					max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, tmp);
 				}
 			}

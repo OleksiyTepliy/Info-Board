@@ -20,15 +20,6 @@ enum i2c_mode {
 	MR = 1,
 };
 
-enum i2c_bus_state {
-	IDLE,
-	SEND_START,
-	SEND_SECOND_START,
-	SEND_ADDRESS,
-	SEND_DATA,
-	SEND_STOP,
-};
-
 enum i2c_master_common_status_codes {
 	START_TRANSMITTED = 0x08,
 	REPEATED_START_TRANSMITTED = 0x10,
@@ -45,12 +36,12 @@ enum i2c_master_transmitter_status_codes {
 enum i2c_master_receiver_status_codes {
 	MR_SLA_R_TRANSMITTED_RECEIVED_ACK = 0x40,
 	MR_SLA_R_TRANSMITTED_RECEIVED_NACK = 0x48,
-	MR_DATA_RECIVED_RECEIVED_ACK = 0x50,
-	MR_DATA_RECIVED_RECEIVED_NACK = 0x58,
+	MR_DATA_RECIVED = 0x50,
+	MR_DATA_RECIVED_TRANSMITTED_NACK = 0x58,
 };
 
 void i2c_init();
 
-void i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size);
+bool i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t transmit_data[], uint16_t size);
 
-void i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size);
+bool i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t received_data[], uint16_t size);
