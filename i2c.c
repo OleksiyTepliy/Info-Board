@@ -2,15 +2,18 @@
 #include <avr/interrupt.h>
 #include <avr/power.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "i2c.h"
 #include "uart.h"
 
 uint8_t dev_adress;
 uint8_t dev_register;
-const uint8_t *data_buff;
+const uint8_t *transmit_buff;
+uint8_t *receive_buff;
 uint16_t data_len;
 enum i2c_mode I2C_MODE;
 volatile uint16_t data_idx = 0;
+volatile bool busy_bus = false;
 
 void i2c_init()
 {
@@ -31,36 +34,42 @@ void i2c_init()
 	TWCR |= (1 << TWEN) | (1 << TWIE); // enable TWI module and TWI interrupts
 }
 
-void i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size)
+bool i2c_send(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t transmitted_data[], uint16_t write_size)
 {
+	while (busy_bus);
 	dev_adress = dev_addr << 1;
 	dev_register = dev_mem_addr;
-	data_buff = data;
-	data_len = size;
+	transmit_buff = transmitted_data;
+	data_len = write_size;
 	data_idx = 0;
 	I2C_MODE = MT;
+ 	busy_bus = true;
 	START;
+	while(busy_bus);
+	return true;
 }
 
-void i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, const uint8_t *data, uint16_t size)
+bool i2c_read(uint8_t dev_addr, uint8_t dev_mem_addr, uint8_t received_data[], uint16_t read_size)
 {
+	while (busy_bus);
 	dev_adress = dev_addr << 1 | 0x01;
 	dev_register = dev_mem_addr;
-	data_buff = data;
-	data_len = size;
+	receive_buff = received_data;
+	data_len = read_size;
 	data_idx = 0;
 	I2C_MODE = MR;
+ 	busy_bus = true;
 	START;
+	while (busy_bus);
+	return true;
 }
-
-//uint8_t ds1307_addr = 0x68;
 
 // Two-wire Serial Interface Interrupt
 ISR(TWI_vect, ISR_BLOCK)
 {
 	switch(TWSR) {
 		case START_TRANSMITTED: {
-			TWDR = dev_adress;
+			TWDR = dev_adress & ~0x01;
 			DIS_START;
 			CLEAR_TWINT;
 		} break;
@@ -69,82 +78,47 @@ ISR(TWI_vect, ISR_BLOCK)
 			CLEAR_TWINT;
 		} break;
 		case MR_SLA_R_TRANSMITTED_RECEIVED_ACK: {
-			START;
+			CLEAR_TWINT;
 		} break;
 		case REPEATED_START_TRANSMITTED: {
-			TWDR = dev_register; // register to read
-			DIS_START; // stop start
-			CLEAR_TWINT;
-		} break;
-		case MR_DATA_RECIVED_RECEIVED_ACK: {
-			uint8_t info = TWDR;
-			ACK; // ACK
-			CLEAR_TWINT;
+				TWDR = dev_adress;
+				DIS_START;
+				CLEAR_TWINT;
 		} break;
 		case MT_DATA_TRANSMITTED_RECEIVED_ACK: {
-			if (data_idx < data_len) {
-				TWDR = data_buff[data_idx++];
-				CLEAR_TWINT;
-			}
-			else {
-				STOP;
-				CLEAR_TWINT;
+			if (I2C_MODE == MR) {
+				START;
+			} else if (I2C_MODE == MT) {
+				if (data_idx < data_len) {
+					TWDR = transmit_buff[data_idx++];
+					CLEAR_TWINT;
+				} 
+				else {
+					STOP;
+					busy_bus = false;
+					CLEAR_TWINT;
+				}
 			}
 		} break;
+		case MR_DATA_RECIVED: {
+			if (data_idx < data_len) {
+				receive_buff[data_idx++] = TWDR;
+				ACK;
+			}
+			else {
+				NACK;
+			}
+			CLEAR_TWINT;
+		} break;
+		case MR_DATA_RECIVED_TRANSMITTED_NACK: {
+			receive_buff[data_idx++] = TWDR;
+			STOP;
+			busy_bus = false;
+			CLEAR_TWINT;
+		} break;
 		default: {
-			//CLEAR_TWINT;
+			busy_bus = false;
+			CLEAR_TWINT;
 		}
 	}
-
-/*
-	// READ FROM REGISTER
-	if (num == 4) {
-		TWDR = write; // address + write flag
-		DIS_START; // stop start 
-		CLEAR_TWINT; // clear interrupt flag, immideatly will activate TWI and send data.
-	}
-	if (num == 5) {
-		TWDR = 0x06; // register to read
-		CLEAR_TWINT;
-	}
-	if (num == 6) {
-		START;
-
-	}
-	if (num == 7) {
-		TWDR = read;
-		DIS_START; // stop start
-		CLEAR_TWINT;
-	}
-	if (num == 8) {
-		//info[0] = TWDR; // succsess  read cmd transmit ACK or NACK says slave
-		ACK; // ACK
-		CLEAR_TWINT;
-	}
-	if (num == 9) {
-		info[0] = TWDR; // wait for first data byte
-		//NACK;
-		CLEAR_TWINT;
-	}
-	if (num == 10) {
-		info[1] = TWDR; // wait for second data byte
-		NACK;
-		STOP;
-		CLEAR_TWINT;
-	}
-	if (num == 11) {
-		info[2] = '\0';
-		//STOP; // stop condition
-		CLEAR_TWINT;
-	}
-
-
-	if (num == 11) {
-		uart_send(info);
-		num = 0;
-	}
-
-	// READ FROM REGISTER 
-*/
-	//num++;
 }

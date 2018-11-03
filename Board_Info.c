@@ -12,6 +12,8 @@
 #include "uart.h"
 #include "process_cmd.h"
 #include "adc.h"
+#include "i2c.h"
+#include "DS1307.h"
 
 volatile uint16_t timer = 0; // time counter
 volatile bool flags[U_SIZE] = {0};
@@ -19,11 +21,10 @@ uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
-volatile uint8_t constant_brightness = 0;
-volatile enum display_modes show_mode = STRING;
-volatile enum brightness_modes br_mode = AUTO;
+volatile enum display_modes show_mode = CLOCK_SS;
+volatile enum brightness_modes br_mode = BR_1;
 
-volatile struct rtc clock = {
+struct rtc clock = {
 	.hh = 0,
 	.mm = 0,
 	.ss = 0
@@ -31,17 +32,13 @@ volatile struct rtc clock = {
 
 /* default events timings in ms / 10 */
 /* default timings divided by 10, because timer interrupt rise every 10 ms */
-volatile struct timings tm = { 
+struct timings tm = { 
 	.rtc = 10U, // 100 ms
 	.screen = 4U, // 40 ms
 	.temp = 300U, // 3sec
 	.photo = 500U // 5 sec,
 };
 
-/**
- * u_rtc - updates rtc struct.
- */
-static void u_rtc(void);
 
 /**
  * u_screen - updates panels according to the mode flag.
@@ -74,10 +71,11 @@ int main(void)
 	SPI_MasterInit(); // pin 10 CS, pin 11 MOSI, pin 13 SCLK
 	uart_init();
 	i2c_init();
+	adc_init();
 	max7219_Init();
 	max7219_clear_panels(ALL);
-	adc_init();
 	sei();
+	ds1307_reset(); //do it after interrupts are enable
 
 	/* Timer 1 Init */
 	TCCR1B |= (1 << WGM12);	 // mode 4 CTC Mode
@@ -120,15 +118,6 @@ int main(void)
 	TCCR1B |= (1 << CS11);
 
 	while(1) {
-
-		if (flags[U_RTC]) {
-			u_rtc();
-			uint8_t data[] = {0x8F, 0x12};
-			i2c_send(0x68, 0x06, data, sizeof(data));
-			//#include "i2c.h"
-			//START;
-			flags[U_RTC] = false;
-		}
 
 		if (flags[U_SCREEN]) {
 			if (show_mode == STRING) {
@@ -184,7 +173,7 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[U_EEPROM] = false;
 			}
-			TCCR1B |= (1 << CS11); // start again
+			TCCR1B |= (1 << CS11); // start timer again
 		}
 	}
 }
@@ -194,10 +183,6 @@ int main(void)
 ISR(TIMER1_COMPA_vect, ISR_BLOCK)
 {
 	timer++;
-	if (timer % 100 == 0)
-		clock.ss++;
-	if (timer % tm.rtc == 0)
-		flags[U_RTC] = true;
 	if (timer % tm.screen == 0)
 		flags[U_SCREEN] = true;
 	if (timer % tm.temp == 0)
@@ -209,34 +194,17 @@ ISR(TIMER1_COMPA_vect, ISR_BLOCK)
 }
 
 
-/* u_rtc - updates rtc struct */
-static void u_rtc(void)
-{
-	if ( clock.ss >= 60) {
-		clock.ss %= 60;
-		clock.mm++;
-	}
-	if (clock.mm >= 60) {
-		clock.mm %= 60;
-		clock.hh++;
-	}
-	if (clock.hh >= 24) {
-		clock.hh %= 24;
-	}
-}
-
-
 /* u_screen - updates panels according to the mode flag */
 static void u_screen(enum display_modes flag)
 {
 	if (flag == CLOCK_HH) {
-		uint8_t hh = clock.hh;
-		uint8_t mm = clock.mm;
-		u_time(hh, mm);
+		clock.hh = ds1307_get_hours();
+		clock.mm = ds1307_get_minutes();
+		u_time(clock.hh, clock.mm);
 	} else if (flag == CLOCK_SS) {
-		uint8_t mm = clock.mm;
-		uint8_t ss = clock.ss;
-		u_time(mm, ss);
+		clock.ss = ds1307_get_seconds();
+		clock.mm = ds1307_get_minutes();
+		u_time(clock.mm, clock.ss);
 	} else if (flag == TEMP) {
 		u_temp(25);
 	} else if (flag == TEST) {

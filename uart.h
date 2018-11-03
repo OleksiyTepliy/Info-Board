@@ -12,3 +12,5 @@ void uart_init(void);
  * 
  */
 void uart_send(char *arr);
+
+void uart_tx(uint8_t *data, uint16_t size);
