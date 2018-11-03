@@ -102,17 +102,16 @@ ISR(TWI_vect, ISR_BLOCK)
 		} break;
 		case MR_DATA_RECIVED: {
 			if (data_idx < data_len) {
-				ACK;
 				receive_buff[data_idx++] = TWDR;
+				ACK;
 			}
 			else {
 				NACK;
 			}
-			
 			CLEAR_TWINT;
 		} break;
 		case MR_DATA_RECIVED_TRANSMITTED_NACK: {
-			receive_buff[data_idx] = TWDR;
+			receive_buff[data_idx++] = TWDR;
 			STOP;
 			busy_bus = false;
 			CLEAR_TWINT;

@@ -75,8 +75,7 @@ int main(void)
 	max7219_Init();
 	max7219_clear_panels(ALL);
 	sei();
-	//ds1307_reset(); //do it after interrupts are enable
-	
+	ds1307_reset(); //do it after interrupts are enable
 
 	/* Timer 1 Init */
 	TCCR1B |= (1 << WGM12);	 // mode 4 CTC Mode
@@ -201,8 +200,6 @@ static void u_screen(enum display_modes flag)
 	if (flag == CLOCK_HH) {
 		clock.hh = ds1307_get_hours();
 		clock.mm = ds1307_get_minutes();
-		// uart_tx(&clock.hh, sizeof(clock.hh));
-		// uart_tx(&clock.mm, sizeof(clock.mm));
 		u_time(clock.hh, clock.mm);
 	} else if (flag == CLOCK_SS) {
 		clock.ss = ds1307_get_seconds();
