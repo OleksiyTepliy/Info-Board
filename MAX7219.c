@@ -8,7 +8,7 @@ void max7219_Init(void)
 {
 	max7219_cmd_to(ALL, MAX7219_SHUTDOWN_REG, 0x01); // Turn On.
 	max7219_cmd_to(ALL, MAX7219_SCAN_LIMIT_REG, 0x07); // Activate all rows.
-	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, 0x01); // 0 - 15 levels of Intensity.
+	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, 0x00); // 0 - 15 levels of Intensity.
 	max7219_cmd_to(ALL, MAX7219_DECODE_MODE_REG, 0x00); // No decode mode.
 	max7219_cmd_to(ALL, MAX7219_DISPLAY_TEST_REG, 0x00); // Display-Test off.
 }

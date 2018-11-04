@@ -9,10 +9,8 @@ extern volatile bool flags[];
 void adc_init(void)
 {
 	ADMUX |= (1 << REFS0) | (1 << ADLAR); //AV CC with external capacitor at AREF pin, result left adjusted.
-	//ADMUX 0000 ADC0 configured
 	ADCSRA |= (1 << ADIE); // ADC and Interrupt Enable.
 	ADCSRA |= (1 << ADPS0) | (1 << ADPS1) | (1 << ADPS2) | (1 << ADEN); // ADC Prescaler / 128, and enable adc.
-	//ADCSRB = 0; // free mode 
 }
 
 
