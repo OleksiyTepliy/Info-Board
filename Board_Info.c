@@ -17,7 +17,7 @@
 
 static volatile uint16_t timer = 0;
 volatile bool flags[U_SIZE] = {0};
-bool tick_flag = false;
+bool dots_blink = false;
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
@@ -85,7 +85,7 @@ static void timer_enable(void)
 
 static void timer_disable(void)
 {
-	TCCR2B &= (~(1 << CS20) | ~(1 << CS22)); // prescaler 128
+	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
 }
 
 
@@ -106,6 +106,14 @@ int main(void)
 	/* Led Init */
 	DDRB |= 1 << DDB0; // pin 8 
 	PORTB &= ~(1 << DDB0); // logic 0.
+
+	DDRD &= ~(1 << DDD5) | ~(1 << DDD6) | ~(1 << DDD7);
+	PORTD |= (1 << DDD7);
+	PCICR |= (1 << PCIE2);
+	PCMSK2 |= (1 << PCINT23);
+	/* PD3 rising edge, PD2 falling edge */
+	EICRA |= (1 << ISC11) | (1 << ISC10) | (1 << ISC01);
+	EIMSK |= (1 << INT1) | (1 << INT0);
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -219,9 +227,23 @@ ISR(TIMER2_COMPA_vect, ISR_BLOCK)
 		if (br_mode == AUTO)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 	}
-	PORTB ^= (1 << DDB0); // toggle led
+}
+
+ISR(PCINT2_vect)
+{
 	PORTB ^= (1 << DDB0); // toggle led
 }
+
+ISR(INT0_vect)
+{
+	PORTB &= ~(1 << DDB0);
+}
+
+ISR(INT1_vect)
+{
+	PORTB |= (1 << DDB0);
+}
+
 
 /* u_screen - updates panels according to the mode flag */
 static void u_screen(enum display_modes flag)
@@ -231,7 +253,7 @@ static void u_screen(enum display_modes flag)
 	uint8_t temp = ds1307_get_seconds();
 	if (temp != clock.ss) {
 		clock.ss = temp;
-		tick_flag = !tick_flag;
+		dots_blink = !dots_blink;
 	}
 
 	if (flag == CLOCK_HH) {
@@ -262,10 +284,10 @@ static void u_time(uint8_t left, uint8_t right)
 			}
 			if (j == 1 || j == 2 || j == 5 || j == 6) { // form blinking dots
 				if (i == 1) {
-					if (tick_flag)
+					if (dots_blink)
 						num[j] ^= 0x01;
 				} else if (i == 2) {
-					if (tick_flag)
+					if (dots_blink)
 						num[j] ^= 0x80;
 				}
 			}

@@ -30,7 +30,7 @@ void i2c_init()
 //     Bit 0 – TWIE TWI Interrupt Enable
 	power_twi_enable();
 	/* SCLK = 16Mhz / (16 + 2 * (TWBR) * (Prescaler)) */
-	TWBR = 0x0C; // SCL - 400kHz
+	TWBR = 0x48; // SCL - 100kHz
 	TWCR |= (1 << TWEN) | (1 << TWIE); // enable TWI module and TWI interrupts
 }
 

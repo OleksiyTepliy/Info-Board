@@ -13,8 +13,8 @@
 extern volatile enum display_modes show_mode;
 extern volatile bool flags[U_SIZE];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
-extern volatile struct timings tm;
-extern volatile struct rtc clock;
+extern struct timings tm;
+extern struct rtc clock;
 extern volatile enum brightness_modes br_mode;
 
 extern uint8_t Rx_buff[]; // UART - receive data buffer
