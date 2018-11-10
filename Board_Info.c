@@ -1,10 +1,10 @@
 #include "Board_Info.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 #include <util/atomic.h>
 #include <avr/eeprom.h>
 #include <stdint.h>
-#include <stdio.h> /************************************************************************************/
 #include <stdbool.h>
 #include "spi.h"
 #include "front.h"
@@ -15,14 +15,15 @@
 #include "i2c.h"
 #include "DS1307.h"
 
-volatile uint16_t timer = 0; // time counter
+static volatile uint16_t timer = 0;
 volatile bool flags[U_SIZE] = {0};
+bool dots_blink = false;
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
 volatile enum display_modes show_mode = CLOCK_SS;
-volatile enum brightness_modes br_mode = BR_1;
+volatile enum brightness_modes br_mode = BR_0;
 
 struct rtc clock = {
 	.hh = 0,
@@ -30,13 +31,12 @@ struct rtc clock = {
 	.ss = 0
 };
 
-/* default events timings in ms / 10 */
-/* default timings divided by 10, because timer interrupt rise every 10 ms */
+/* default events timings */
 struct timings tm = { 
-	.rtc = 10U, // 100 ms
-	.screen = 4U, // 40 ms
-	.temp = 300U, // 3sec
-	.photo = 500U // 5 sec,
+	.rtc = 100, // 100 ms
+	.screen = 40, // 40 ms
+	.temp = 3000, // 3sec
+	.photo = 5000 // 5 sec,
 };
 
 
@@ -65,6 +65,29 @@ static void u_temp(uint8_t t);
  */
 static void u_photo(void);
 
+static void timer_init(void)
+{
+		/* Timer 2 Init */
+	TCCR2A = 0x00;// TC2 Control Register A
+	TIMSK2 = 0x00;// Interrupt mask register
+	TCCR2B = 0x00;
+
+	TCCR2A |= (1 << WGM21); // CTC mode
+	TIMSK2 |= (1 << OCIE2A); // enable interrupts
+	/* f(1kHz) = 16Mhz / (prescaler * (1 + OCR2A)) */
+	OCR2A = 0x7C; // 124
+}
+
+static void timer_enable(void)
+{
+	TCCR2B |= (1 << CS20) | (1 << CS22); // prescaler 128
+}
+
+static void timer_disable(void)
+{
+	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
+}
+
 
 int main(void)
 {
@@ -72,20 +95,25 @@ int main(void)
 	uart_init();
 	i2c_init();
 	adc_init();
+	timer_init();
 	max7219_Init();
 	max7219_clear_panels(ALL);
+	set_sleep_mode(SLEEP_MODE_PWR_SAVE);
+	sleep_enable();	/* Set SE (sleep enable bit) */
 	sei();
-	ds1307_reset(); //do it after interrupts are enable
-
-	/* Timer 1 Init */
-	TCCR1B |= (1 << WGM12);	 // mode 4 CTC Mode
-	TIMSK1 |= (1 << OCIE1A); // enable timer interrupt bit
-	OCR1A |= 20000 - 1; 	 //fOCnA == 100hz; 10 ms interrupt.
+	//ds1307_reset(); //do it after interrupts are enable
 	
 	/* Led Init */
 	DDRB |= 1 << DDB0; // pin 8 
 	PORTB &= ~(1 << DDB0); // logic 0.
 
+	DDRD &= ~(1 << DDD5) | ~(1 << DDD6) | ~(1 << DDD7);
+	PORTD |= (1 << DDD7);
+	PCICR |= (1 << PCIE2);
+	PCMSK2 |= (1 << PCINT23);
+	/* PD3 rising edge, PD2 falling edge */
+	EICRA |= (1 << ISC11) | (1 << ISC10) | (1 << ISC01);
+	EIMSK |= (1 << INT1) | (1 << INT0);
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -114,22 +142,26 @@ int main(void)
 	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
-	/* set prescaler to 256 and start timer */
-	TCCR1B |= (1 << CS11);
+	timer_enable();
 
 	while(1) {
 
-		if (flags[U_SCREEN]) {
-			if (show_mode == STRING) {
-				if (screen_buff == main_buff + last_indx)
-					screen_buff = main_buff;
-				update_screen(screen_buff);
-				screen_buff++;
+		if (flags[U_SCREEN] && (show_mode == STRING)) {
+			if (screen_buff == main_buff + last_indx) {
+				screen_buff = main_buff;
 			}
-			else {
-				u_screen(show_mode);
-			}
+			update_screen(screen_buff);
+			screen_buff++;
+		} else {
 			flags[U_SCREEN] = false;
+		}
+
+		if (flags[U_RTC] && (show_mode == CLOCK_HH || 
+			show_mode == CLOCK_SS)) {
+			u_screen(show_mode);
+			flags[U_RTC] = false;
+		} else {
+			flags[U_RTC] = false;
 		}
 
 		if (flags[U_TEMP]) {
@@ -154,7 +186,7 @@ int main(void)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
-			TCCR1B &= ~(1 << CS11); // turn off timer
+			timer_disable();
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
@@ -173,37 +205,60 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[U_EEPROM] = false;
 			}
-			TCCR1B |= (1 << CS11); // start timer again
+			timer_enable();
 		}
+
+		//sleep_cpu();	/* Put MCU to sleep */
+		//sleep_disable();	/* Disable sleeps for safety */
 	}
 }
 
-
-/* 10ms interrupts */
-ISR(TIMER1_COMPA_vect, ISR_BLOCK)
+/* 1ms interrupts */
+ISR(TIMER2_COMPA_vect, ISR_BLOCK)
 {
 	timer++;
-	if (timer % tm.screen == 0)
+	if (timer % tm.rtc == 0) {
+		flags[U_RTC] = true;
+	} else if (timer % tm.screen == 0) {
 		flags[U_SCREEN] = true;
-	if (timer % tm.temp == 0)
+	} if (timer % tm.temp == 0) {
 		flags[U_TEMP] = true;
-	if (timer % tm.photo == 0) {
+	} if (timer % tm.photo == 0) {
 		if (br_mode == AUTO)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 	}
+}
+
+ISR(PCINT2_vect)
+{
+	PORTB ^= (1 << DDB0); // toggle led
+}
+
+ISR(INT0_vect)
+{
+	PORTB &= ~(1 << DDB0);
+}
+
+ISR(INT1_vect)
+{
+	PORTB |= (1 << DDB0);
 }
 
 
 /* u_screen - updates panels according to the mode flag */
 static void u_screen(enum display_modes flag)
 {
+	clock.hh = ds1307_get_hours();
+	clock.mm = ds1307_get_minutes();
+	uint8_t temp = ds1307_get_seconds();
+	if (temp != clock.ss) {
+		clock.ss = temp;
+		dots_blink = !dots_blink;
+	}
+
 	if (flag == CLOCK_HH) {
-		clock.hh = ds1307_get_hours();
-		clock.mm = ds1307_get_minutes();
 		u_time(clock.hh, clock.mm);
 	} else if (flag == CLOCK_SS) {
-		clock.ss = ds1307_get_seconds();
-		clock.mm = ds1307_get_minutes();
 		u_time(clock.mm, clock.ss);
 	} else if (flag == TEMP) {
 		u_temp(25);
@@ -221,6 +276,21 @@ static void u_time(uint8_t left, uint8_t right)
 		uint8_t num[8];
 		for (uint8_t j = 0; j < 8; j++) {
 			num[j] = pgm_read_byte(&NUM_ARR[clock_arr[i]][j]);
+			/* By default, all letter are left aligned, we left 0 and 
+			1st-panel as is, and align 2 and 3rd panel to the right. 
+			It prevents blinking dots overlapping */
+			if (i > 1) {
+				MOVE_TO_RIGHT(num[j], 2);
+			}
+			if (j == 1 || j == 2 || j == 5 || j == 6) { // form blinking dots
+				if (i == 1) {
+					if (dots_blink)
+						num[j] ^= 0x01;
+				} else if (i == 2) {
+					if (dots_blink)
+						num[j] ^= 0x80;
+				}
+			}
 		}
 		max7219_send_char_to(i, num);
 	}

@@ -1,5 +1,6 @@
-/* spell ok */
-#define F_CPU 16000000UL
+#ifndef F_CPU
+#define F_CPU   16000000UL
+#endif
 
 #ifdef __AVR__
 #include <avr/pgmspace.h>
@@ -19,6 +20,9 @@
 /* how many times to measure resistor before brightness adjustment */
 /* measuring interval can be set in timings struct */
 #define PHOTO_MEASURE_SAMPLES 5U
+
+#define MOVE_TO_LEFT(num, pos) ((num) <<= (pos))
+#define MOVE_TO_RIGHT(num, pos) ((num) >>= (pos))
 
 
 /* event flags */
