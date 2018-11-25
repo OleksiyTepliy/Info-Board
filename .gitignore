@@ -2,5 +2,9 @@
 .vscode
 #object files
 *.o
+#linker files
+*.elf
+#hex files
+*.hex
 #PDF folder
 PDF/
