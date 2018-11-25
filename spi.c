@@ -11,7 +11,8 @@ void SPI_MasterInit(void)
 	/* SPI Control Register */
 	SPCR = 0; // reset register
 	SPCR |= (1 << MSTR); // Master Mode
-	SPCR &= ~(1 << SPR1) | ~(1 << SPR0); // fosc / 4
+	SPCR &= ~(1 << SPR1) | ~(1 << SPR0); 
+	SPSR |= (1 << SPI2X); // fosc / 2
 	SPCR &= ~(1 << CPHA) | ~(1 << CPOL); // SPI Mode 0
 	SPCR &= ~(1 << DORD); // MSB Mode
 	//SPCR |= (1 << SPIE); // enable interrupt

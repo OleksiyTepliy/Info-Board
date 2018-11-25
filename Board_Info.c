@@ -24,6 +24,7 @@ uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
 volatile enum display_modes show_mode = CLOCK_SS;
 volatile enum brightness_modes br_mode = BR_0;
+static volatile uint8_t counter = 0;
 
 struct rtc clock = {
 	.hh = 0,
@@ -34,7 +35,7 @@ struct rtc clock = {
 /* default events timings */
 struct timings tm = { 
 	.rtc = 100, // 100 ms
-	.screen = 40, // 40 ms
+	.screen = 30, // 40 ms
 	.temp = 3000, // 3sec
 	.photo = 5000 // 5 sec,
 };
@@ -107,12 +108,12 @@ int main(void)
 	DDRB |= 1 << DDB0; // pin 8 
 	PORTB &= ~(1 << DDB0); // logic 0.
 
-	DDRD &= ~(1 << DDD5) | ~(1 << DDD6) | ~(1 << DDD7);
-	PORTD |= (1 << DDD7);
+	DDRD &= ~(1 << DDD2) | ~(1 << DDD3) | ~(1 << DDD7); // configure as inputs
+	//PORTD |= (1 << PORTD2) | (1 << PORTD3) | (1 << PORTD7); // enable pull up resistors
 	PCICR |= (1 << PCIE2);
-	PCMSK2 |= (1 << PCINT23);
-	/* PD3 rising edge, PD2 falling edge */
-	EICRA |= (1 << ISC11) | (1 << ISC10) | (1 << ISC01);
+	PCMSK2 |= (1 << PCINT23); // pin change interrupt on PD7
+	/* PD3, PD2 rising edge interrupt */
+	EICRA |= (1 << ISC10) | (1 << ISC11) | (1 << ISC00) | (1 << ISC01);
 	EIMSK |= (1 << INT1) | (1 << INT0);
 
 	/* read eeprom message size */
@@ -152,7 +153,6 @@ int main(void)
 			}
 			update_screen(screen_buff);
 			screen_buff++;
-		} else {
 			flags[U_SCREEN] = false;
 		}
 
@@ -166,6 +166,7 @@ int main(void)
 
 		if (flags[U_TEMP]) {
 			/********** ONEWIRE START TEMP **********/
+			u_temp(counter);
 			flags[U_TEMP] = false;
 		}
 
@@ -214,34 +215,81 @@ int main(void)
 }
 
 /* 1ms interrupts */
-ISR(TIMER2_COMPA_vect, ISR_BLOCK)
+ISR(TIMER2_COMPA_vect)
 {
 	timer++;
+	// if (timer % 10) {
+	// 	return;
+	// }
+
 	if (timer % tm.rtc == 0) {
 		flags[U_RTC] = true;
-	} else if (timer % tm.screen == 0) {
+	}
+
+	if (timer % tm.screen == 0) {
 		flags[U_SCREEN] = true;
-	} if (timer % tm.temp == 0) {
+	} 
+
+	if (timer % tm.temp == 0) {
 		flags[U_TEMP] = true;
-	} if (timer % tm.photo == 0) {
+	}
+
+	if (timer % tm.photo == 0) {
 		if (br_mode == AUTO)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 	}
 }
 
+enum rotation {
+	COUNTERCLOCKWISE = 0,
+	CLOCKWISE,
+};
+
+static volatile bool rotation_flag = false;
+static volatile enum rotation direction;
+static volatile uint16_t last_tick = 0;
+static const uint8_t debounce = 1;
+static volatile bool pressed = false;
+
 ISR(PCINT2_vect)
 {
-	PORTB ^= (1 << DDB0); // toggle led
+	if ((timer - last_tick > debounce)) {
+		uint8_t state = PIND & (1 << PIND7);
+		if (!state) {
+			switch (show_mode) {
+			case STRING:
+				show_mode = CLOCK_HH;
+				break;
+			case CLOCK_HH:
+				show_mode = CLOCK_SS;
+				break;
+			case CLOCK_SS:
+				show_mode = STRING;
+				break;
+			default:
+				show_mode = STRING;
+			}
+		}
+	}
+	last_tick = timer;
 }
 
-ISR(INT0_vect)
+ISR(INT0_vect) // PD2, counter_clockwise
 {
-	PORTB &= ~(1 << DDB0);
+
 }
 
-ISR(INT1_vect)
+ISR(INT1_vect) // PD3, clockwise
 {
-	PORTB |= (1 << DDB0);
+	uint8_t pd2_state = PIND & (1 << PIND2);
+	//uint8_t pd3_state = PIND & (1 << PIND3);
+	if (!pd2_state) {
+		counter++;
+		PORTB |= (1 << DDB0);
+	} else {
+		counter--;
+		PORTB &= ~(1 << DDB0);
+	}
 }
 
 

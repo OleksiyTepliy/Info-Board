@@ -1,0 +1,6 @@
+#vscode files
+.vscode
+#object files
+*.o
+#PDF folder
+PDF/

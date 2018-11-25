@@ -83,18 +83,18 @@ void uart_send(char *arr)
 	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0); // UDRE interrupt will be executed immediately
 }
 
-void uart_tx(uint8_t *data, uint16_t size)
-{
-	while(tx_flag);
-	memcpy(Tx_buff, data, size);
+// void uart_tx(uint8_t *data, uint16_t size)
+// {
+// 	while(tx_flag);
+// 	memcpy(Tx_buff, data, size);
 
-	tx_idx = 0;
-	UDR0 = Tx_buff[tx_idx];
-	tx_idx++;
+// 	tx_idx = 0;
+// 	UDR0 = Tx_buff[tx_idx];
+// 	tx_idx++;
 
-	tx_flag = true;
-	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0);
-}
+// 	tx_flag = true;
+// 	UCSR0B |=  (1 << TXCIE0) | (1 << UDRIE0);
+// }
 
 // void uart_send_byte(char byte)
 // {

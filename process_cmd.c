@@ -13,7 +13,7 @@
 extern volatile enum display_modes show_mode;
 extern volatile bool flags[U_SIZE];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
-extern struct timings tm;
+extern volatile struct timings tm;
 extern struct rtc clock;
 extern volatile enum brightness_modes br_mode;
 
@@ -129,9 +129,9 @@ void process_command(void)
 			}
 		} else if (!strcmp(cmd, "us")) {
 			uint8_t tmp = atoi(args);
-			if (tmp < 1 || tmp > 10) {
+			if (tmp < 10 || tmp > 100) {
 				err = E_ARG;
-				uart_send("accept 1 - 10");
+				uart_send("accept 10 - 100 ms");
 			}
 			else {
 				tm.screen = tmp;
