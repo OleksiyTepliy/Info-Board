@@ -19,7 +19,7 @@ ISR(ADC_vect, ISR_BLOCK)
 	static uint8_t n = 0; 
 	photo_avg[n++] = ADCH;
 	if (n == PHOTO_MEASURE_SAMPLES - 1) {
-		flags[U_PHOTO] = true;
+		flags[UPDATE_BRIGHTNESS] = true;
 		n = 0;
 	}
 }

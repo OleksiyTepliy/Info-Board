@@ -11,7 +11,7 @@ uint8_t Tx_buff[128]; // UART - transmit data buffer
 static uint16_t data_len = 0;
 volatile uint8_t rx_idx; // Rx_buff index
 volatile uint8_t tx_idx; // Tx_buff index
-extern volatile bool flags[U_SIZE];
+extern volatile bool flags[];
 extern volatile bool tx_flag;
 
 void uart_init(void)
@@ -50,7 +50,7 @@ ISR(USART_RX_vect, ISR_BLOCK)
 		UCSR0B &= ~(1 << RXEN0) | ~(1 << RXCIE0);
                 Rx_buff[rx_idx] = '\0';
                 rx_idx = 0;
-                flags[U_UART] = true; // update UART flag
+                flags[EVENT_UART] = true; // update UART flag
                 return;
         }
        	Rx_buff[rx_idx++] = temp;
@@ -131,14 +131,14 @@ ISR(USART_TX_vect, ISR_BLOCK)
 ISR(USART_UDRE_vect, ISR_BLOCK)
 {
 	/* we need to write a new data byte */
-	if (tx_flag && Tx_buff[tx_idx] != '\0') {
-		UDR0 = Tx_buff[tx_idx++]; 
-		return;
-	}
-	// if (tx_idx < data_len) {
-	// 	UDR0 = Tx_buff[tx_idx++];
+	// if (tx_flag && Tx_buff[tx_idx] != '\0') {
+	// 	UDR0 = Tx_buff[tx_idx++]; 
 	// 	return;
 	// }
+	if (tx_idx < data_len) {
+		UDR0 = Tx_buff[tx_idx++];
+		return;
+	}
 	/* if all data has been sent need to disable this interrupt */
 	UCSR0B &= ~(1 << UDRIE0);
 }

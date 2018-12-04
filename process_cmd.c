@@ -10,16 +10,24 @@
 #include "MAX7219.h"
 #include "DS1307.h"
 
-extern volatile enum display_modes show_mode;
-extern volatile bool flags[U_SIZE];
+extern volatile DISPLAY_MODE activeDisplayMode;
+extern volatile bool flags[UPDATE_COUNT];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
-extern struct timings tm;
-extern struct rtc clock;
-extern volatile enum brightness_modes br_mode;
+extern struct RTC_DATA clock;
+extern BRIGHTNESS_MODE brightnessLevel;
 
 extern uint8_t Rx_buff[]; // UART - receive data buffer
 volatile bool tx_flag = false;
 
+static uint16_t timings[UPDATE_COUNT] = { 
+	[UPDATE_CLOCK_HH] = 100,
+	[UPDATE_CLOCK_SS] = 100,
+	[UPDATE_STRING] = 40,
+	[UPDATE_TEMP] = 15000,
+	[UPDATE_CANDLE] = 20,
+	[UPDATE_TEST] = 0,
+	[UPDATE_BRIGHTNESS] = 30000,
+};
 
 /* 10 commands */
 //uint8_t *commands[] = {"sh", "sm", "stp", "sl", "ut", "ub", "us", "ul", "help", "test"};
@@ -89,13 +97,13 @@ void process_command(void)
 
 	if (parsed == 1) {
 		if (!strcmp((char *) Rx_buff, "sl")) {
-			show_mode = STRING;
+			activeDisplayMode = DISPLAY_MODE_STRING;
 		} else if (!strcmp((char *) Rx_buff, "sh")) {
-			show_mode = CLOCK_HH;
+			activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
 		} else if (!strcmp((char *) Rx_buff, "ss")) {
-			show_mode = CLOCK_SS;
+			activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
 		} else if (!strcmp((char *) Rx_buff, "stp")) {
-			show_mode = TEMP;
+			activeDisplayMode = DISPLAY_MODE_TEMP;
 		} else if (!strcmp((char *) Rx_buff, "test")) {
 			// test panels
 		} else if (!strcmp((char *) Rx_buff, "help")) {
@@ -109,7 +117,7 @@ void process_command(void)
 		if (strcmp((char *) cmd, "ul") == 0) {
 			strcpy((char *) eeprom_update_buff, (char *) (Rx_buff + 3));
 			uart_send((char *) eeprom_update_buff);
-			flags[U_EEPROM] = true;
+			flags[EVENT_EEPROM] = true;
 		} else if (strcmp(cmd, "ut") == 0) {
 			uint32_t time;
 			if (strlen(args) > 6 || (time = atol(args)) > 235958) {
@@ -129,16 +137,16 @@ void process_command(void)
 			}
 		} else if (!strcmp(cmd, "us")) {
 			uint8_t tmp = atoi(args);
-			if (tmp < 1 || tmp > 10) {
+			if (tmp < 10 || tmp > 100) {
 				err = E_ARG;
-				uart_send("accept 1 - 10");
+				uart_send("accept 10 - 100 ms");
 			}
 			else {
-				tm.screen = tmp;
+				timings[UPDATE_STRING] = tmp;
 			}
 		} else if (!strcmp(cmd, "ub")) {
 			if (!strcmp(args, "auto")) {
-				br_mode = AUTO;
+				brightnessLevel = AUTO;
 			}
 			else {
 				uint8_t tmp = atoi(args);
@@ -146,7 +154,7 @@ void process_command(void)
 					err = E_ARG;
 				}
 				else {
-					br_mode = BR_0;
+					brightnessLevel = MINIMAL;
 					max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, tmp);
 				}
 			}

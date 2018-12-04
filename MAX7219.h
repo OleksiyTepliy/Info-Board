@@ -28,7 +28,7 @@ enum MAX7219_registers {
  * MAX7219_Init - Sets MAX7219 default settings.
  * 
  */
-void max7219_Init(void);
+void max7219_Init(BRIGHTNESS_MODE brightnessLevel);
 
 
 /**

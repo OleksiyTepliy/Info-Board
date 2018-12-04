@@ -24,63 +24,50 @@
 #define MOVE_TO_LEFT(num, pos) ((num) <<= (pos))
 #define MOVE_TO_RIGHT(num, pos) ((num) >>= (pos))
 
+/* display states */
+typedef enum DISPLAY_MODE {
+	DISPLAY_MODE_CLOCK_HH = 0,
+	DISPLAY_MODE_CLOCK_SS,
+	DISPLAY_MODE_STRING,
+	DISPLAY_MODE_TEMP,
+	DISPLAY_MODE_CANDLE,
+	DISPLAY_MODE_TEST,
+	DISPLAY_MODE_MODES_COUNT
+} DISPLAY_MODE;
 
 /* event flags */
-enum u_flags {
-	U_RTC = 0,
-	U_SCREEN,
-	U_TEMP,
-	U_PHOTO,
-	U_UART,
-	U_EEPROM,
-	U_SIZE
-};
+typedef enum EVENT_FLAGS {
+	EVENT_BRIGHTNESS,
+	EVENT_BATTERY,
+	EVENT_ALARM,
+	EVENT_UART,
+	EVENT_EEPROM,
+	EVENT_COUNT
+} EVENT_FLAGS;
 
-
-/* display states */
-enum display_modes {
-	CLOCK_HH = 0,
-	CLOCK_SS,
-	STRING,
-	TEMP,
-	TEST,
-	CANDLE
-};
-
+typedef enum UPDATE_TIMINGS {
+	UPDATE_CLOCK_HH,
+	UPDATE_CLOCK_SS,
+	UPDATE_STRING,
+	UPDATE_TEMP,
+	UPDATE_CANDLE,
+	UPDATE_TEST,
+	UPDATE_BRIGHTNESS,
+	UPDATE_COUNT
+} UPDATE_TIMINGS;
 
 /* brightness modes */
-enum brightness_modes {
-	BR_0 = 0,
-	BR_1,
-	BR_2,
-	BR_3,
-	BR_4,
-	BR_5,
-	BR_6,
-	BR_7,
-	BR_8,
-	BR_9,
-	BR_10,
-	BR_11,
-	BR_12,
-	BR_13,
-	BR_14,
-	BR_15,
-	AUTO
-};
+typedef enum BRIGHTNESS_MODE {
+	MINIMAL = 0x00,
+	LOW = 0x04,
+	MEDIUM = 0x08,
+	HIGH = 0x12,
+	MAXIMAL = 0x15,
+	AUTO,
+} BRIGHTNESS_MODE;
 
-
-/* default timings divided by 10, because timer interrupt rise every 10 ms */
-struct timings {
-	uint16_t rtc;   // 100 ms
-	uint16_t screen; // 10 - 50 ms
-	uint16_t temp; // 1 sec - 10sec
-	uint16_t photo; // 3sec - 60sec	
-};
-
-
-struct rtc {
+typedef struct RTC_DATA {
 	uint8_t hh;
 	uint8_t mm;
 	uint8_t ss;
-};
+} RTC_DATA;
