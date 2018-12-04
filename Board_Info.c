@@ -16,43 +16,42 @@
 #include "DS1307.h"
 
 static volatile uint16_t timer = 0;
-volatile bool flags[U_SIZE] = {0};
-bool dots_blink = false;
+volatile bool flags[UPDATE_COUNT] = {0};
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
-volatile enum display_modes show_mode = CLOCK_SS;
-volatile enum brightness_modes br_mode = BR_0;
-static volatile uint8_t counter = 0;
+volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
+volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
+static volatile uint8_t counter = 50;
+static const uint16_t debounce = 5;
 
-struct rtc clock = {
+RTC_DATA clock = {
 	.hh = 0,
 	.mm = 0,
 	.ss = 0
 };
 
-/* default events timings */
-struct timings tm = { 
-	.rtc = 100, // 100 ms
-	.screen = 30, // 40 ms
-	.temp = 3000, // 3sec
-	.photo = 5000 // 5 sec,
+/* screen update timings */
+static uint16_t timings[UPDATE_COUNT] = { 
+	[UPDATE_CLOCK_HH] = 100,
+	[UPDATE_CLOCK_SS] = 100,
+	[UPDATE_STRING] = 40,
+	[UPDATE_TEMP] = 50,
+	[UPDATE_CANDLE] = 20,
+	[UPDATE_TEST] = 0,
+	[UPDATE_BRIGHTNESS] = 30000,
 };
-
 
 /**
  * u_screen - updates panels according to the mode flag.
- * @flag: display_modes flag
  */
-static void u_screen(enum display_modes flag);
+static void u_screen();
 
 /**
  * u_time - updates time on display according to the mode flag.
- * @left: hours or minutes
- * @right: minutes or seconds
  */
-static void u_time(uint8_t left, uint8_t right);
+static void updateTime();
 
 /**
  * u_temp - updates temperature on display.
@@ -89,6 +88,15 @@ static void timer_disable(void)
 	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
 }
 
+static void encoderInit(void)
+{
+	DDRD &= ~(1 << DDD2) | ~(1 << DDD3) | ~(1 << DDD4); // configure as inputs
+	PORTD |= (1 << PORTD2) | (1 << PORTD3) | (1 << PORTD4); // enable pull up resistors
+	EICRA = 0x00;
+	EICRA |= (1 << ISC01); // INT0 - PD2 - falling edge - button
+	EICRA |= (1 << ISC10) | (1 << ISC11); // INT1 - PD3 - rising edge - encoder
+	EIMSK |= (1 << INT1) | (1 << INT0); // enable interrupts
+}
 
 int main(void)
 {
@@ -97,24 +105,17 @@ int main(void)
 	i2c_init();
 	adc_init();
 	timer_init();
-	max7219_Init();
+	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
-	set_sleep_mode(SLEEP_MODE_PWR_SAVE);
-	sleep_enable();	/* Set SE (sleep enable bit) */
+	encoderInit();
+	//set_sleep_mode(SLEEP_MODE_PWR_SAVE);
+	//sleep_enable();	/* Set SE (sleep enable bit) */
 	sei();
 	//ds1307_reset(); //do it after interrupts are enable
 	
 	/* Led Init */
 	DDRB |= 1 << DDB0; // pin 8 
 	PORTB &= ~(1 << DDB0); // logic 0.
-
-	DDRD &= ~(1 << DDD2) | ~(1 << DDD3) | ~(1 << DDD7); // configure as inputs
-	//PORTD |= (1 << PORTD2) | (1 << PORTD3) | (1 << PORTD7); // enable pull up resistors
-	PCICR |= (1 << PCIE2);
-	PCMSK2 |= (1 << PCINT23); // pin change interrupt on PD7
-	/* PD3, PD2 rising edge interrupt */
-	EICRA |= (1 << ISC10) | (1 << ISC11) | (1 << ISC00) | (1 << ISC01);
-	EIMSK |= (1 << INT1) | (1 << INT0);
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -147,43 +148,35 @@ int main(void)
 
 	while(1) {
 
-		if (flags[U_SCREEN] && (show_mode == STRING)) {
+		if (flags[UPDATE_STRING]) {
 			if (screen_buff == main_buff + last_indx) {
 				screen_buff = main_buff;
 			}
 			update_screen(screen_buff);
 			screen_buff++;
-			flags[U_SCREEN] = false;
+			flags[UPDATE_STRING] = false;
 		}
 
-		if (flags[U_RTC] && (show_mode == CLOCK_HH || 
-			show_mode == CLOCK_SS)) {
-			u_screen(show_mode);
-			flags[U_RTC] = false;
-		} else {
-			flags[U_RTC] = false;
+		if (flags[UPDATE_CLOCK_HH] || flags[UPDATE_CLOCK_SS]) {
+			updateTime();
+			flags[UPDATE_CLOCK_HH] = flags[UPDATE_CLOCK_SS] = false;
 		}
 
-		if (flags[U_TEMP]) {
+		if (flags[UPDATE_TEMP]) {
 			/********** ONEWIRE START TEMP **********/
 			u_temp(counter);
-			flags[U_TEMP] = false;
+			flags[UPDATE_TEMP] = false;
 		}
 
-		if (flags[U_PHOTO]) {
-			u_photo();
-			flags[U_PHOTO] = false;
-		}
-
-		if (flags[U_UART]) {
+		if (flags[EVENT_UART]) {
 			process_command();
-			flags[U_UART] = false;
+			flags[EVENT_UART] = false;
 			/* after command process finished, enable reciver and rx interrupts */
 			UCSR0B |= (1 << RXEN0) | (1 << RXCIE0);
 		}
 
-		if (flags[U_EEPROM]) {
-			if (show_mode == STRING)
+		if (flags[EVENT_EEPROM]) {
+			if (activeDisplayMode == DISPLAY_MODE_STRING)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
@@ -204,11 +197,10 @@ int main(void)
 				str_to_arr_trans(message, mess_len, main_buff, FRONT_ASCII);
 				screen_buff = main_buff;
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
-				flags[U_EEPROM] = false;
+				flags[EVENT_EEPROM] = false;
 			}
 			timer_enable();
 		}
-
 		//sleep_cpu();	/* Put MCU to sleep */
 		//sleep_disable();	/* Disable sleeps for safety */
 	}
@@ -218,125 +210,97 @@ int main(void)
 ISR(TIMER2_COMPA_vect)
 {
 	timer++;
-	// if (timer % 10) {
-	// 	return;
-	// }
-
-	if (timer % tm.rtc == 0) {
-		flags[U_RTC] = true;
-	}
-
-	if (timer % tm.screen == 0) {
-		flags[U_SCREEN] = true;
-	} 
-
-	if (timer % tm.temp == 0) {
-		flags[U_TEMP] = true;
-	}
-
-	if (timer % tm.photo == 0) {
-		if (br_mode == AUTO)
+	if (timer % timings[activeDisplayMode] == 0)
+		flags[activeDisplayMode] = true;
+	
+	if (brightnessLevel == AUTO)
+		if (timer % timings[UPDATE_BRIGHTNESS] == 0)
 			ADCSRA |= (1 << ADSC); // start photo conversion
-	}
 }
 
-enum rotation {
-	COUNTERCLOCKWISE = 0,
-	CLOCKWISE,
-};
-
-static volatile bool rotation_flag = false;
-static volatile enum rotation direction;
-static volatile uint16_t last_tick = 0;
-static const uint8_t debounce = 1;
-static volatile bool pressed = false;
-
-ISR(PCINT2_vect)
+ISR(INT0_vect) // PD2 interrupt, button.
 {
-	if ((timer - last_tick > debounce)) {
-		uint8_t state = PIND & (1 << PIND7);
-		if (!state) {
-			switch (show_mode) {
-			case STRING:
-				show_mode = CLOCK_HH;
-				break;
-			case CLOCK_HH:
-				show_mode = CLOCK_SS;
-				break;
-			case CLOCK_SS:
-				show_mode = STRING;
-				break;
-			default:
-				show_mode = STRING;
-			}
+	static uint16_t buttonLastTick = 0;
+	uint16_t currentTick = timer;
+	if (currentTick - buttonLastTick > debounce) {
+		switch (activeDisplayMode) {
+		case DISPLAY_MODE_STRING:
+			activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
+			break;
+		case DISPLAY_MODE_CLOCK_HH:
+			activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
+			break;
+		case DISPLAY_MODE_CLOCK_SS:
+			activeDisplayMode = DISPLAY_MODE_TEMP;
+			break;
+		case DISPLAY_MODE_TEMP:
+		default:
+			activeDisplayMode = DISPLAY_MODE_STRING;
+			break;
 		}
 	}
-	last_tick = timer;
+	buttonLastTick = currentTick;
 }
 
-ISR(INT0_vect) // PD2, counter_clockwise
+ISR(INT1_vect) // PD3 interrupt, encoder.
 {
-
-}
-
-ISR(INT1_vect) // PD3, clockwise
-{
-	uint8_t pd2_state = PIND & (1 << PIND2);
-	//uint8_t pd3_state = PIND & (1 << PIND3);
-	if (!pd2_state) {
-		counter++;
-		PORTB |= (1 << DDB0);
-	} else {
-		counter--;
-		PORTB &= ~(1 << DDB0);
+	static uint16_t encoderLastTick = 0;
+	uint16_t currentTick = timer;
+	if(currentTick - encoderLastTick > debounce) {
+		if ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3))) {
+			if (counter != 0)
+				counter--;
+		} else {
+			if (counter != 99)
+				counter++;
+		}
 	}
+	encoderLastTick = currentTick;
 }
-
-
-/* u_screen - updates panels according to the mode flag */
-static void u_screen(enum display_modes flag)
-{
-	clock.hh = ds1307_get_hours();
-	clock.mm = ds1307_get_minutes();
-	uint8_t temp = ds1307_get_seconds();
-	if (temp != clock.ss) {
-		clock.ss = temp;
-		dots_blink = !dots_blink;
-	}
-
-	if (flag == CLOCK_HH) {
-		u_time(clock.hh, clock.mm);
-	} else if (flag == CLOCK_SS) {
-		u_time(clock.mm, clock.ss);
-	} else if (flag == TEMP) {
-		u_temp(25);
-	} else if (flag == TEST) {
-
-	}
-}
-
 
 /* update time on display */
-static void u_time(uint8_t left, uint8_t right)
-{
-	uint8_t clock_arr[4] = {left / 10U, left % 10U, right / 10U, right % 10};
-	for (uint8_t i = 0; i < LED_NUM; i++) {
+static void updateTime()
+{	
+	uint8_t curerntTick = ds1307_get_seconds();
+	if (clock.ss == curerntTick)
+		return;
+	clock.ss = curerntTick;
+	clock.mm = ds1307_get_minutes();
+	clock.hh = ds1307_get_hours();
+	
+	uint8_t clock_arr[4];
+
+	if (activeDisplayMode == DISPLAY_MODE_CLOCK_HH) {
+		clock_arr[0] = clock.hh / 10U;
+		clock_arr[1] = clock.hh % 10U;
+		clock_arr[2] = clock.mm / 10U;
+		clock_arr[3] = clock.mm % 10;
+	} else if (activeDisplayMode == DISPLAY_MODE_CLOCK_SS) {
+		clock_arr[0] = clock.mm / 10U;
+		clock_arr[1] = clock.mm % 10;
+		clock_arr[2] = clock.ss / 10U;
+		clock_arr[3] = clock.ss % 10;
+	} 
+	
+	static bool blinkDots = true;
+	blinkDots = !blinkDots;
+
+	for (uint8_t i = 0; i < LED_NUM; i++) { // i - panel number
 		uint8_t num[8];
-		for (uint8_t j = 0; j < 8; j++) {
+		for (uint8_t j = 0; j < 8; j++) { // j - column number
 			num[j] = pgm_read_byte(&NUM_ARR[clock_arr[i]][j]);
 			/* By default, all letter are left aligned, we left 0 and 
 			1st-panel as is, and align 2 and 3rd panel to the right. 
 			It prevents blinking dots overlapping */
-			if (i > 1) {
-				MOVE_TO_RIGHT(num[j], 2);
-			}
+			if (i > 1)
+				MOVE_TO_RIGHT(num[j], 2); // num[j] - row
+
 			if (j == 1 || j == 2 || j == 5 || j == 6) { // form blinking dots
-				if (i == 1) {
-					if (dots_blink)
+				if (blinkDots) {
+					if (i == 1)
 						num[j] ^= 0x01;
-				} else if (i == 2) {
-					if (dots_blink)
-						num[j] ^= 0x80;
+					else if (i == 2)
+						num[j] |= 0x80;
 				}
 			}
 		}
