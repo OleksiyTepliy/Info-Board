@@ -4,7 +4,7 @@ MCU:=atmega328p
 PROGPORT:=/dev/ttyUSB0
 
 CC=avr-gcc
-CFLAGS=-mmcu=$(MCU) -Os -Wall -Wextra -Wpedantic -Waddr-space-convert -Wmisspelled-isr #-Werror  -save-temps
+CFLAGS=-mmcu=$(MCU) -O2 -Wall -Wextra -Wpedantic -Waddr-space-convert -Wmisspelled-isr #-Werror  -save-temps
 SIZE:=avr-size --format=avr --mcu=$(MCU)
 OBJCOPY:=avr-objcopy -j .text -j .data -O ihex
 

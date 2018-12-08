@@ -10,7 +10,7 @@
 #include "MAX7219.h"
 #include "DS1307.h"
 
-extern volatile DISPLAY_MODE activeDisplayMode;
+static volatile DISPLAY_MODE activeDisplayMode; 				/* TODO: ADD GET FUNCTIONS */
 extern volatile bool flags[UPDATE_COUNT];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
 extern struct RTC_DATA clock;
