@@ -22,11 +22,11 @@ uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
-static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
+static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_TEST; // DISPLAY_MODE_CLOCK_SS
 static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
 static volatile uint8_t *encoderCounter = NULL;
-static const uint16_t debounce = 1;
+static const uint16_t debounce = 40;
 static volatile uint8_t panelIndex = 0;
 
 RTC_DATA clock = {
@@ -42,7 +42,7 @@ static uint16_t timings[UPDATE_COUNT] = {
 	[UPDATE_STRING] = 40,
 	[UPDATE_TEMP] = 50,
 	[UPDATE_CANDLE] = 20,
-	[UPDATE_TEST] = 0,
+	[UPDATE_TEST] = 20,
 	[UPDATE_BRIGHTNESS] = 30000,
 	[UPDATE_SETTINGS] = 300,
 };
@@ -69,6 +69,8 @@ static void u_temp(uint8_t t);
  * 
  */
 static void u_photo(void);
+
+static void processTestMode(void);
 
 static void sysTickInit(void)
 {
@@ -196,6 +198,12 @@ int main(void)
 			flags[UPDATE_TEMP] = false;
 		}
 
+		if (flags[UPDATE_TEST]) {
+			/********** ONEWIRE START TEMP **********/
+			processTestMode();
+			flags[UPDATE_TEST] = false;
+		}
+
 		if (flags[EVENT_UART]) {
 			process_command();
 			flags[EVENT_UART] = false;
@@ -292,9 +300,11 @@ ISR(INT0_vect) // PD2 interrupt, button.
 			else
 				activeDisplayMode = DISPLAY_MODE_TEMP;
 			break;
+		case DISPLAY_MODE_TEST:
+			activeDisplayMode = DISPLAY_MODE_CLOCK_HH; //DISPLAY_MODE_TEST;
+			break;
 		case DISPLAY_MODE_TEMP:
 		case DISPLAY_MODE_CANDLE:
-		case DISPLAY_MODE_TEST:
 		default:
 			activeDisplayMode = DISPLAY_MODE_STRING;
 			break;
@@ -309,23 +319,33 @@ ISR(INT1_vect) // PD3 interrupt, encoder.
 	uint16_t currentTick = timeTick;
 	if (encoderCounter == NULL)
 		return;
-
+							// TODO: debounce of encoder
 	if(currentTick - encoderLastTick > debounce) {
 		if ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3))) {
-			*encoderCounter = ++(*encoderCounter) % 60;
-		} else {
 			*encoderCounter = --(*encoderCounter) % 60;
+		} else {
+			*encoderCounter = ++(*encoderCounter) % 60;
 		}
 	}
 	encoderLastTick = currentTick;
 }
 
-static sendFunc (uint8_t panelNumber, uint8_t value) {
+static void sendFunc (uint8_t panelNumber, uint8_t value) {
 	uint8_t num[8];
 	for (uint8_t j = 0; j < 8; j++) { // j - column number
 		num[j] = pgm_read_byte(&NUM_ARR[value][j]);
 	}
 	max7219_send_char_to(panelNumber, num);
+}
+
+static uint8_t value = 5;
+
+static void processTestMode()	// works, value change
+{
+	sendFunc(3, 8);
+	encoderCounter = &value;
+	sendFunc(0, *encoderCounter);
+	EIMSK |= (1 << INT1); // enable encoder interrupts
 }
 
 static void updateTimeSettings()
@@ -338,7 +358,7 @@ static void updateTimeSettings()
 
 	switch(activeDisplayMode) {
 		case DISPLAY_MODE_CLOCK_HH:
-			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.hh: &clock.mm;
+			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.hh : &clock.mm;
 			break;
 		case DISPLAY_MODE_CLOCK_SS:
 			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.mm : &clock.ss;
@@ -364,8 +384,8 @@ static void updateTimeSettings()
 	static bool blinkDots = true; // blink dots every second
 	blinkDots = !blinkDots;
 
-	sendFunc(panelIndex, clock.hh / 10);
-	sendFunc(panelIndex, clock.hh % 10);
+	sendFunc(panelIndex, *encoderCounter / 10);
+	sendFunc(panelIndex + 1, *encoderCounter % 10);
 
 	max7219_cmd_to(panelIndex % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); // toggle panel state
 	max7219_cmd_to((panelIndex + 1) % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); 
