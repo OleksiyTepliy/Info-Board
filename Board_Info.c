@@ -192,7 +192,7 @@ int main(void)
 
 		if (flags[UPDATE_TEMP]) {
 			/********** ONEWIRE START TEMP **********/
-			u_temp(*encoderCounter);
+			u_temp(25);
 			flags[UPDATE_TEMP] = false;
 		}
 
@@ -312,11 +312,9 @@ ISR(INT1_vect) // PD3 interrupt, encoder.
 
 	if(currentTick - encoderLastTick > debounce) {
 		if ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3))) {
-			if (*encoderCounter != 0)
-				*encoderCounter--;
+			*encoderCounter = ++(*encoderCounter) % 60;
 		} else {
-			if (*encoderCounter != 59)
-				*encoderCounter++;
+			*encoderCounter = --(*encoderCounter) % 60;
 		}
 	}
 	encoderLastTick = currentTick;
