@@ -14,6 +14,7 @@
 #include "adc.h"
 #include "i2c.h"
 #include "DS1307.h"
+#include "gpio.h"
 
 static volatile uint16_t timeTick = 0;
 volatile bool flags[UPDATE_COUNT] = {0};
@@ -22,7 +23,7 @@ uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
-static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_TEST; // DISPLAY_MODE_CLOCK_SS
+static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS; // DISPLAY_MODE_TEST;
 static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
 static volatile uint8_t *encoderCounter = NULL;
@@ -72,7 +73,7 @@ static void u_photo(void);
 
 static void processTestMode(void);
 
-static void sysTickInit(void)
+static void mainTimerInit(void)
 {
 		/* Timer 2 Init */
 	TCCR2A = 0x00;// TC2 Control Register A
@@ -85,12 +86,12 @@ static void sysTickInit(void)
 	OCR2A = 0x7C; // 124
 }
 
-static void sysTickEnable(void)
+static void mainTimerEnable(void)
 {
 	TCCR2B |= (1 << CS20) | (1 << CS22); // prescaler 128
 }
 
-static void sysTickDisable(void)
+static void mainTimerDisable(void)
 {
 	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
 }
@@ -130,7 +131,7 @@ int main(void)
 	uart_init();
 	i2c_init();
 	adc_init();
-	sysTickInit();
+	mainTimerInit();
 	holdButtonTimerInit();
 	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
@@ -141,8 +142,8 @@ int main(void)
 	//ds1307_reset(); //do it after interrupts are enable
 	
 	/* Led Init */
-	DDRB |= 1 << DDB0; // pin 8 
-	PORTB &= ~(1 << DDB0); // logic 0.
+	bool status = gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
+	while(!status);
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -171,7 +172,7 @@ int main(void)
 	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
-	sysTickEnable();
+	mainTimerEnable();
 
 	while(1) {
 
@@ -216,7 +217,7 @@ int main(void)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
-			sysTickDisable();
+			mainTimerDisable();
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
@@ -235,7 +236,7 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[EVENT_EEPROM] = false;
 			}
-			sysTickEnable();
+			mainTimerEnable();
 		}
 		//sleep_cpu();	/* Put MCU to sleep */
 		//sleep_disable();	/* Disable sleeps for safety */
@@ -259,11 +260,11 @@ ISR(TIMER1_COMPA_vect)
 	holdButtonTimerStop();
 	holdEventHappend = true;
 	if (!settingsEnabled) {
-		PORTB |= (1 << PORTB0);
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_HIGH);
 		settingsEnabled = true;
 		EIMSK |= (1 << INT1); // enable encoder interrupts
 	} else {
-		PORTB &= ~(1 << PORTB0);
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_LOW);
 		settingsEnabled = false;
 		settingsApply = true;	
 		EIMSK &= ~(1 << INT1); // disable encoder interrupts
