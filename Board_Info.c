@@ -15,6 +15,10 @@
 #include "i2c.h"
 #include "DS1307.h"
 #include "gpio.h"
+#include "encoder.h"
+#include "applicationTimer.h"
+
+#define ENCODER_DEBOUNCE (2)
 
 static volatile uint16_t timeTick = 0;
 volatile bool flags[UPDATE_COUNT] = {0};
@@ -26,9 +30,10 @@ volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
 static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS; // DISPLAY_MODE_TEST;
 static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
-static volatile uint8_t *encoderCounter = NULL;
+static uint16_t encoderCounter;
 static const uint16_t debounce = 40;
 static volatile uint8_t panelIndex = 0;
+static void timerCallback(uint16_t timeStamp);
 
 RTC_DATA clock = {
 	.hh = 0,
@@ -73,28 +78,7 @@ static void u_photo(void);
 
 static void processTestMode(void);
 
-static void mainTimerInit(void)
-{
-		/* Timer 2 Init */
-	TCCR2A = 0x00;// TC2 Control Register A
-	TIMSK2 = 0x00;// Interrupt mask register
-	TCCR2B = 0x00;
 
-	TCCR2A |= (1 << WGM21); // CTC mode
-	TIMSK2 |= (1 << OCIE2A); // enable interrupts
-	/* f(1kHz) = 16Mhz / (prescaler * (1 + OCR2A)) */
-	OCR2A = 0x7C; // 124
-}
-
-static void mainTimerEnable(void)
-{
-	TCCR2B |= (1 << CS20) | (1 << CS22); // prescaler 128
-}
-
-static void mainTimerDisable(void)
-{
-	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
-}
 
 static void holdButtonTimerInit()
 {	// Timer1 init
@@ -115,35 +99,33 @@ static void holdButtonTimerStop()
 	TCCR1B &= ~((1 << CS10) | (1 << CS12));
 }
 
-static void encoderInit(void)
-{
-	DDRD &= ~(1 << DDD2) | ~(1 << DDD3) | ~(1 << DDD4); // configure as inputs
-	PORTD |= (1 << PORTD2) | (1 << PORTD3) | (1 << PORTD4); // enable pull up resistors
-	EICRA = 0x00;
-	EICRA |= (1 << ISC00); // INT0 - PD2 - logical change - button
-	EICRA |= (1 << ISC10) | (1 << ISC11); // INT1 - PD3 - rising edge - encoder
-	EIMSK |= (1 << INT0); // enable button interrupts
-}
-
 int main(void)
 {
+	bool initStatus = true;
 	SPI_MasterInit(); // pin 10 CS, pin 11 MOSI, pin 13 SCLK
 	uart_init();
 	i2c_init();
 	adc_init();
-	mainTimerInit();
 	holdButtonTimerInit();
 	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
-	encoderInit();
+	// TODO: check status for all inits
+
+	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, ENCODER_DEBOUNCE);
+	encoderEnableButtonIsr(true);
+	encoderEnableRotaryIsr(true);
+	uint16_t timerPeriod = 1;
+	initStatus &= applicationTimerInit(timerPeriod, timerCallback);
+
+	/* Led Init */
+	initStatus |= gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
+	// TODO: add watchdog to reboot device if we stuck here, or reset manualy.
+	while(!initStatus);
+
 	//set_sleep_mode(SLEEP_MODE_PWR_SAVE);
 	//sleep_enable();	/* Set SE (sleep enable bit) */
 	sei();
 	//ds1307_reset(); //do it after interrupts are enable
-	
-	/* Led Init */
-	bool status = gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
-	while(!status);
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -172,7 +154,7 @@ int main(void)
 	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
-	mainTimerEnable();
+	applicationTimerEnable();
 
 	while(1) {
 
@@ -217,7 +199,7 @@ int main(void)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
-			mainTimerDisable();
+			applicationTimerDisable();
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
@@ -236,17 +218,16 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[EVENT_EEPROM] = false;
 			}
-			mainTimerEnable();
+			applicationTimerEnable();
 		}
 		//sleep_cpu();	/* Put MCU to sleep */
 		//sleep_disable();	/* Disable sleeps for safety */
 	}
 }
 
-/* 1ms interrupts */
-ISR(TIMER2_COMPA_vect)
+static void timerCallback(uint16_t timeStamp)
 {
-	timeTick++;
+	uint16_t timeTick = timeStamp;
 	if (timeTick % timings[activeDisplayMode] == 0)
 		flags[activeDisplayMode] = true;
 	
@@ -314,23 +295,6 @@ ISR(INT0_vect) // PD2 interrupt, button.
 	buttonLastTick = currentTick;
 }
 
-ISR(INT1_vect) // PD3 interrupt, encoder.
-{
-	static uint16_t encoderLastTick = 0;
-	uint16_t currentTick = timeTick;
-	if (encoderCounter == NULL)
-		return;
-							// TODO: debounce of encoder
-	if(currentTick - encoderLastTick > debounce) {
-		if ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3))) {
-			*encoderCounter = --(*encoderCounter) % 60;
-		} else {
-			*encoderCounter = ++(*encoderCounter) % 60;
-		}
-	}
-	encoderLastTick = currentTick;
-}
-
 static void sendFunc (uint8_t panelNumber, uint8_t value) {
 	uint8_t num[8];
 	for (uint8_t j = 0; j < 8; j++) { // j - column number
@@ -344,8 +308,8 @@ static uint8_t value = 5;
 static void processTestMode()	// works, value change
 {
 	sendFunc(3, 8);
-	encoderCounter = &value;
-	sendFunc(0, *encoderCounter);
+	encoderCounter = value;
+	sendFunc(0, encoderCounter);
 	EIMSK |= (1 << INT1); // enable encoder interrupts
 }
 
@@ -359,10 +323,12 @@ static void updateTimeSettings()
 
 	switch(activeDisplayMode) {
 		case DISPLAY_MODE_CLOCK_HH:
-			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.hh : &clock.mm;
+			encoderCounter = (panelIndex % LED_NUM == 0) ? clock.hh : clock.mm;
+			encoderSetCounter(&encoderCounter);
 			break;
 		case DISPLAY_MODE_CLOCK_SS:
-			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.mm : &clock.ss;
+			encoderCounter = (panelIndex % LED_NUM == 0) ? clock.mm : clock.ss;
+			encoderSetCounter(&encoderCounter);
 			break;
 		default:
 			break;
@@ -374,7 +340,8 @@ static void updateTimeSettings()
 		ds1307_set_hours(clock.hh);
 		ds1307_set_minutes(clock.mm);
 		ds1307_set_seconds(clock.ss);
-		encoderCounter = NULL;
+		encoderCounter = 0;
+		encoderSetCounter(NULL);
 		settingsApply = false;
 		panelState = 0x01;
 		panelIndex = 0;
@@ -385,8 +352,8 @@ static void updateTimeSettings()
 	static bool blinkDots = true; // blink dots every second
 	blinkDots = !blinkDots;
 
-	sendFunc(panelIndex, *encoderCounter / 10);
-	sendFunc(panelIndex + 1, *encoderCounter % 10);
+	sendFunc(panelIndex, encoderCounter / 10);
+	sendFunc(panelIndex + 1, encoderCounter % 10);
 
 	max7219_cmd_to(panelIndex % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); // toggle panel state
 	max7219_cmd_to((panelIndex + 1) % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); 
