@@ -2,6 +2,13 @@
 #define F_CPU   16000000UL
 #endif
 
+#ifdef __AVR__
+#include <avr/pgmspace.h>
+#else
+#define PROGMEM
+#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <avr/io.h>
@@ -20,13 +27,6 @@
 #include "gpio.h"
 #include "encoder.h"
 #include "applicationTimer.h"
-
-#ifdef __AVR__
-#include <avr/pgmspace.h>
-#else
-#define PROGMEM
-#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
-#endif
 
 static void onApplicationTimerEventCallback(uint16_t timeStamp);
 static void onEncoderButtonShortPressEventCallback(void);

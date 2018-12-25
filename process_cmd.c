@@ -1,3 +1,10 @@
+#ifdef __AVR__
+#include <avr/pgmspace.h>
+#else
+#define PROGMEM
+#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
+#endif
+
 #include <avr/io.h>
 #include <stdint.h>
 #include <stdlib.h>

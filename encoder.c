@@ -51,6 +51,7 @@ void encoderEnableButtonIsr(bool isrEnable)
         EIMSK &= ~(1 << INT0);
 }
 
+
 // TODO: make callback from main
 ISR(INT1_vect) // PD3 interrupt, encoder.
 {
@@ -64,8 +65,7 @@ ISR(INT1_vect) // PD3 interrupt, encoder.
 	encoderLastTick = currentTick;
 }
 
-/****************************** HOLD TIMER PART ********************************/
-
+/***********************************************************************************/
 // TODO: put this timer in sepparate module, with adjusted period and callback
 static bool holdButtonTimerInit(uint16_t timerPeriod /* add long press callback */)
 {
@@ -88,8 +88,8 @@ static void holdButtonTimerStop()
 {
 	TCCR1B &= ~((1 << CS10) | (1 << CS12));
 }
+/***********************************************************************************/
 
-/****************************** HOLD TIMER PART ********************************/
 
 ISR(INT0_vect) // PD2 interrupt, button.
 {
@@ -102,8 +102,8 @@ ISR(INT0_vect) // PD2 interrupt, button.
         } else {
             holdButtonTimerStop();
             if (currentTick - buttonLastTick < ENCODER_BUTTON_HOLD_TIME)
-                if(buttonShortPressCallback)
-                    buttonShortPressCallback();
+                if(buttonShortPressCallBack)
+                    buttonShortPressCallBack();
         }
     }
 	buttonLastTick = currentTick;
@@ -112,6 +112,6 @@ ISR(INT0_vect) // PD2 interrupt, button.
 ISR(TIMER1_COMPA_vect) // 2sec timer interrupt
 {
 	holdButtonTimerStop();
-    if (buttonLongPressCallback)
-        buttonLongPressCallback();
+    if (buttonLongPressCallBack)
+        buttonLongPressCallBack();
 }
