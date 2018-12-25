@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include <avr/io.h>
-#include "Board_Info.h"
 #include "MAX7219.h"
 #include "spi.h"
 

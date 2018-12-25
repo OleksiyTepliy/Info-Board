@@ -10,7 +10,7 @@ typedef struct GpioPinHandle {
     uint8_t pinNumber;
 } GpioPinHandle;
 
-static GpioPinHandle gpioPinMap[GPIO_PIN_COUNT] = {
+static const GpioPinHandle gpioPinMap[GPIO_PIN_COUNT] = {
     [PIN_0]  =  {&DDRD, &PIND, &PORTD, 0},
     [PIN_1]  =  {&DDRD, &PIND, &PORTD, 1},
     [PIN_2]  =  {&DDRD, &PIND, &PORTD, 2},

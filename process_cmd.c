@@ -79,6 +79,9 @@ void concat(uint8_t *arr, uint16_t arr_size)
 	strcpy((char *) arr, (char *) buff);
 }
 
+// TODO: add enum event parceCommand(uint8_t cmd[], uint16_t len), 
+// will return event enum, refactor  bool processCommand(commandEvent); 
+// return command status into uart after cmd execution
 
 void process_command(void)
 {

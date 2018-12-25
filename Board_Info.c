@@ -9,6 +9,10 @@
 #define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
 #endif
 
+
+#define MOVE_TO_LEFT(num, pos) ((num) <<= (pos))
+#define MOVE_TO_RIGHT(num, pos) ((num) >>= (pos))
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <avr/io.h>
@@ -26,7 +30,7 @@
 #include "DS1307.h"
 #include "gpio.h"
 #include "encoder.h"
-#include "applicationTimer.h"
+#include "timers.h"
 
 static void onApplicationTimerEventCallback(uint16_t timeStamp);
 static void onEncoderButtonShortPressEventCallback(void);
@@ -37,7 +41,6 @@ static void updateTimeSettings();
 static void u_temp(uint8_t t);
 static void processTestMode(void);
 
-static volatile uint16_t timeTick = 0;
 volatile bool flags[UPDATE_COUNT] = {0};
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
@@ -47,7 +50,6 @@ static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS; // DISPL
 static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
 static uint16_t *encoderCounter = NULL;
-static const uint16_t debounce = 40;
 static volatile uint8_t panelIndex = 0;
 
 static RTC_DATA clock = {
@@ -124,7 +126,7 @@ int main(void)
 	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
-	applicationTimerEnable();
+	applicationTimerStart();
 
 	while(1) {
 
@@ -169,7 +171,7 @@ int main(void)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
-			applicationTimerDisable();
+			applicationTimerStop();
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
@@ -188,7 +190,7 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[EVENT_EEPROM] = false;
 			}
-			applicationTimerEnable();
+			applicationTimerStart();
 		}
 		//sleep_cpu();	/* Put MCU to sleep */
 		//sleep_disable();	/* Disable sleeps for safety */
