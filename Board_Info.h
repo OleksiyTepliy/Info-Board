@@ -1,13 +1,3 @@
-#ifndef F_CPU
-#define F_CPU   16000000UL
-#endif
-
-#ifdef __AVR__
-#include <avr/pgmspace.h>
-#else
-#define PROGMEM
-#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
-#endif
 
 #define OFFSET 32U // 32 - offset of ascii array
 

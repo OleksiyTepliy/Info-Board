@@ -1,11 +1,14 @@
-#include "Board_Info.h"
+#ifndef F_CPU
+#define F_CPU   16000000UL
+#endif
+
+#include <stdint.h>
+#include <stdbool.h>
 #include <avr/io.h>
-#include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <util/atomic.h>
 #include <avr/eeprom.h>
-#include <stdint.h>
-#include <stdbool.h>
+#include "Board_Info.h"
 #include "spi.h"
 #include "front.h"
 #include "MAX7219.h"
@@ -18,11 +21,24 @@
 #include "encoder.h"
 #include "applicationTimer.h"
 
-#define ENCODER_DEBOUNCE (2)
+#ifdef __AVR__
+#include <avr/pgmspace.h>
+#else
+#define PROGMEM
+#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
+#endif
+
+static void onApplicationTimerEventCallback(uint16_t timeStamp);
+static void onEncoderButtonShortPressEventCallback(void);
+static void onEncoderButtonLongPressEventCallBack(void);
+static void onEncoderRotaryEventCallback(void);
+static void updateTime();
+static void updateTimeSettings();
+static void u_temp(uint8_t t);
+static void processTestMode(void);
 
 static volatile uint16_t timeTick = 0;
 volatile bool flags[UPDATE_COUNT] = {0};
-static volatile bool holdEventHappend = false;
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
@@ -33,12 +49,8 @@ volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
 static uint16_t *encoderCounter = NULL;
 static const uint16_t debounce = 40;
 static volatile uint8_t panelIndex = 0;
-static void onApplicationtimerEventCallback(uint16_t timeStamp);
-static void onEncoderButtonEventCallback(void);
-static void onEncoderRotaryEventCallback(void);
 
-
-RTC_DATA clock = {
+static RTC_DATA clock = {
 	.hh = 0,
 	.mm = 0,
 	.ss = 0
@@ -56,48 +68,6 @@ static uint16_t timings[UPDATE_COUNT] = {
 	[UPDATE_SETTINGS] = 300,
 };
 
-
-/**
- * u_time - updates time on display according to the mode flag.
- */
-static void updateTime();
-
-static void updateTimeSettings();
-/**
- * u_temp - updates temperature on display.
- * @t: temperature.
- */
-static void u_temp(uint8_t t);
-
-// /**
-//  * u_photo - adjust brightness of the panel.
-//  * 
-//  */
-// static void u_photo(void);
-
-static void processTestMode(void);
-
-
-
-static void holdButtonTimerInit()
-{	// Timer1 init
-	TCCR1A |= 1 << COM1A1; // Clear OC0A on compare match
-	TCCR1B |= 1 << WGM12; // mode 4 CTC
-	TIMSK1 |= 1 << OCIE1A; // OCIE0A overflow interrupt
-	OCR1A = 32200 - 1; // 2Hz
-}
-
-static void holdButtonTimerStart()
-{
-	TCCR1B &= ~((1 << CS10) | (1 << CS12));
-	TCCR1B |= (1 << CS10) | (1 << CS12);
-}
-
-static void holdButtonTimerStop()
-{
-	TCCR1B &= ~((1 << CS10) | (1 << CS12));
-}
-
 int main(void)
 {
 	bool initStatus = true;
@@ -105,18 +75,17 @@ int main(void)
 	uart_init();
 	i2c_init();
 	adc_init();
-	holdButtonTimerInit();
 	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
 	
 	// TODO: check status for all inits
 
-	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, onEncoderButtonEventCallback,
-							  onEncoderRotaryEventCallback);
+	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, onEncoderButtonShortPressEventCallback,
+							  onEncoderButtonLongPressEventCallBack, onEncoderRotaryEventCallback);
 	encoderEnableButtonIsr(true);
 	encoderEnableRotaryIsr(true);
 	uint16_t timerPeriod = 1;
-	initStatus &= applicationTimerInit(timerPeriod, onApplicationtimerEventCallback);
+	initStatus &= applicationTimerInit(timerPeriod, onApplicationTimerEventCallback);
 
 	/* Led Init */
 	initStatus |= gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
@@ -226,7 +195,7 @@ int main(void)
 	}
 }
 
-static void onApplicationtimerEventCallback(uint16_t timeStamp)
+static void onApplicationTimerEventCallback(uint16_t timeStamp)
 {
 	uint16_t timeTick = timeStamp;
 	if (timeTick % timings[activeDisplayMode] == 0)
@@ -237,69 +206,37 @@ static void onApplicationtimerEventCallback(uint16_t timeStamp)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 }
 
-static void onEncoderButtonEventCallback(void)
+static void onEncoderButtonShortPressEventCallback(void)
 {
-	static uint16_t buttonLastTick = 0;
-	uint16_t currentTick = applicationTimerGetTick();
-	bool buttonPinState = gpioPinGetState(PIN_2); //& (1 << PIND2);
-
-	if (!buttonPinState && currentTick - buttonLastTick > debounce) {
-		holdButtonTimerStart();
-	} else if (buttonPinState && currentTick - buttonLastTick > debounce) {
-		if (holdEventHappend) { // to discard button release after long press
-			holdEventHappend = false;
-			return;
-		}
-		holdButtonTimerStop();
-		switch (activeDisplayMode) {
-		case DISPLAY_MODE_STRING:
-			activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
-			break;
-		case DISPLAY_MODE_CLOCK_HH:
-			if (settingsEnabled)
-				panelIndex += 2;
-			else
-				activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
-			break;
-		case DISPLAY_MODE_CLOCK_SS:
-			if (settingsEnabled)
-				panelIndex += 2; // index tells witch variable on witch panels to updade
-			else
-				activeDisplayMode = DISPLAY_MODE_TEMP;
-			break;
-		case DISPLAY_MODE_TEST:
-			activeDisplayMode = DISPLAY_MODE_CLOCK_HH; //DISPLAY_MODE_TEST;
-			break;
-		case DISPLAY_MODE_TEMP:
-		case DISPLAY_MODE_CANDLE:
-		default:
-			activeDisplayMode = DISPLAY_MODE_STRING;
-			break;
-		}
-	}
-	buttonLastTick = currentTick;
-}
-
-static void onEncoderRotaryEventCallback(void)
-{
-	static uint16_t encoderLastTick = 0;
-	uint16_t currentTick = applicationTimerGetTick(); //timeTick;
-								
-								// TODO: debounce of encoder
-
-	if(currentTick - encoderLastTick > ENCODER_DEBOUNCE) {
-		if (gpioPinGetState(PIN_4) && gpioPinGetState(PIN_3))
-			*encoderCounter = --(*encoderCounter) % 60;
+	switch (activeDisplayMode) {
+	case DISPLAY_MODE_STRING:
+		activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
+		break;
+	case DISPLAY_MODE_CLOCK_HH:
+		if (settingsEnabled)
+			panelIndex += 2;
 		else
-			*encoderCounter = ++(*encoderCounter) % 60;
+			activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
+		break;
+	case DISPLAY_MODE_CLOCK_SS:
+		if (settingsEnabled)
+			panelIndex += 2; // index tells witch variable on witch panels to updade
+		else
+			activeDisplayMode = DISPLAY_MODE_TEMP;
+		break;
+	case DISPLAY_MODE_TEST:
+		activeDisplayMode = DISPLAY_MODE_CLOCK_HH; //DISPLAY_MODE_TEST;
+		break;
+	case DISPLAY_MODE_TEMP:
+	case DISPLAY_MODE_CANDLE:
+	default:
+		activeDisplayMode = DISPLAY_MODE_STRING;
+		break;
 	}
-	encoderLastTick = currentTick;
 }
 
-ISR(TIMER1_COMPA_vect)
+static void onEncoderButtonLongPressEventCallBack(void)
 {
-	holdButtonTimerStop();
-	holdEventHappend = true;
 	if (!settingsEnabled) {
 		gpioPinSetState(PIN_8, GPIO_PIN_STATE_HIGH);
 		settingsEnabled = true;
@@ -312,7 +249,16 @@ ISR(TIMER1_COMPA_vect)
 	}
 }
 
-static void sendFunc (uint8_t panelNumber, uint8_t value) {
+static void onEncoderRotaryEventCallback(void)
+{
+	if (gpioPinGetState(PIN_4) && gpioPinGetState(PIN_3))
+		*encoderCounter = --(*encoderCounter) % 60;
+	else
+		*encoderCounter = ++(*encoderCounter) % 60;
+}
+
+static void sendFunc (uint8_t panelNumber, uint8_t value) 
+{
 	uint8_t num[8];
 	for (uint8_t j = 0; j < 8; j++) { // j - column number
 		num[j] = pgm_read_byte(&NUM_ARR[value][j]);

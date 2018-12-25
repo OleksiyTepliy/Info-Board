@@ -12,7 +12,7 @@ static applicationTimerCallback timerCallBack = NULL;
 // TODO: add period value dependency
 bool applicationTimerInit(uint16_t timerPeriod, applicationTimerCallback Callback)
 {
-    if (timerPeriod == 0 || Callback == NULL)
+    if (timerPeriod == 0)
         return false;
     
     timerCallBack = Callback;
@@ -47,9 +47,9 @@ uint16_t applicationTimerGetTick(void)
     return temp;
 }
 
-/* 1ms interrupts */
 ISR(TIMER2_COMPA_vect)
 {
 	timeStamp++;
-    timerCallBack(timeStamp);
+	if (timerCallBack)
+    	timerCallBack(timeStamp);
 }
