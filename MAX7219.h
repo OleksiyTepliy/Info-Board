@@ -5,6 +5,14 @@
 #define CS_LOW  PORTB &= ~(1 << PB2)
 #define CS_HIGH PORTB |= (1 << PB2)
 
+typedef enum BRIGHTNESS_MODE {
+	MINIMAL = 0x00,
+	LOW = 0x04,
+	MEDIUM = 0x08,
+	HIGH = 0x12,
+	MAXIMAL = 0x15,
+	AUTO,
+} BRIGHTNESS_MODE;
 
 enum MAX7219_registers {
     MAX7219_NOOP_REG = 0x00,

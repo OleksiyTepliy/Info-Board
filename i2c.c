@@ -1,8 +1,8 @@
+#include <stdint.h>
+#include <stdbool.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/power.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include "i2c.h"
 #include "uart.h"
 

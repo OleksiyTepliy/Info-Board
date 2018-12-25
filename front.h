@@ -1,6 +1,6 @@
 
 /* https://github.com/squix78/MAX7219LedMatrix */
-
+// TODO: put in separate module, add .c file, write functions for translation character into element string
 const uint8_t FRONT_ASCII[][8] PROGMEM = {
         { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // ' '
         { 0x00, 0x06, 0x5F, 0x5F, 0x06, 0x00, 0x00, 0x00 }, // '!'

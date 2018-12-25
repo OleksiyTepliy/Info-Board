@@ -1,11 +1,25 @@
-#include "Board_Info.h"
+#ifndef F_CPU
+#define F_CPU   16000000UL
+#endif
+
+#ifdef __AVR__
+#include <avr/pgmspace.h>
+#else
+#define PROGMEM
+#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
+#endif
+
+
+#define MOVE_TO_LEFT(num, pos) ((num) <<= (pos))
+#define MOVE_TO_RIGHT(num, pos) ((num) >>= (pos))
+
+#include <stdint.h>
+#include <stdbool.h>
 #include <avr/io.h>
-#include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <util/atomic.h>
 #include <avr/eeprom.h>
-#include <stdint.h>
-#include <stdbool.h>
+#include "Board_Info.h"
 #include "spi.h"
 #include "front.h"
 #include "MAX7219.h"
@@ -14,19 +28,31 @@
 #include "adc.h"
 #include "i2c.h"
 #include "DS1307.h"
+#include "gpio.h"
+#include "encoder.h"
+#include "timers.h"
 
-static volatile uint16_t timer = 0;
+static void onApplicationTimerEventCallback(uint16_t timeStamp);
+static void onEncoderButtonShortPressEventCallback(void);
+static void onEncoderButtonLongPressEventCallBack(void);
+static void onEncoderRotaryEventCallback(void);
+static void updateTime();
+static void updateTimeSettings();
+static void u_temp(uint8_t t);
+static void processTestMode(void);
+
 volatile bool flags[UPDATE_COUNT] = {0};
 uint8_t EEMEM eeprom_buff[MAX_MESSAGE_ARR_SIZE];
 uint16_t EEMEM eeprom_buff_size;
 uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE] = {0};
 volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
-volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
+static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS; // DISPLAY_MODE_TEST;
+static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
-static volatile uint8_t counter = 50;
-static const uint16_t debounce = 5;
+static uint16_t *encoderCounter = NULL;
+static volatile uint8_t panelIndex = 0;
 
-RTC_DATA clock = {
+static RTC_DATA clock = {
 	.hh = 0,
 	.mm = 0,
 	.ss = 0
@@ -39,83 +65,39 @@ static uint16_t timings[UPDATE_COUNT] = {
 	[UPDATE_STRING] = 40,
 	[UPDATE_TEMP] = 50,
 	[UPDATE_CANDLE] = 20,
-	[UPDATE_TEST] = 0,
+	[UPDATE_TEST] = 20,
 	[UPDATE_BRIGHTNESS] = 30000,
+	[UPDATE_SETTINGS] = 300,
 };
-
-/**
- * u_screen - updates panels according to the mode flag.
- */
-static void u_screen();
-
-/**
- * u_time - updates time on display according to the mode flag.
- */
-static void updateTime();
-
-/**
- * u_temp - updates temperature on display.
- * @t: temperature.
- */
-static void u_temp(uint8_t t);
-
-/**
- * u_photo - adjust brightness of the panel.
- * 
- */
-static void u_photo(void);
-
-static void timer_init(void)
-{
-		/* Timer 2 Init */
-	TCCR2A = 0x00;// TC2 Control Register A
-	TIMSK2 = 0x00;// Interrupt mask register
-	TCCR2B = 0x00;
-
-	TCCR2A |= (1 << WGM21); // CTC mode
-	TIMSK2 |= (1 << OCIE2A); // enable interrupts
-	/* f(1kHz) = 16Mhz / (prescaler * (1 + OCR2A)) */
-	OCR2A = 0x7C; // 124
-}
-
-static void timer_enable(void)
-{
-	TCCR2B |= (1 << CS20) | (1 << CS22); // prescaler 128
-}
-
-static void timer_disable(void)
-{
-	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
-}
-
-static void encoderInit(void)
-{
-	DDRD &= ~(1 << DDD2) | ~(1 << DDD3) | ~(1 << DDD4); // configure as inputs
-	PORTD |= (1 << PORTD2) | (1 << PORTD3) | (1 << PORTD4); // enable pull up resistors
-	EICRA = 0x00;
-	EICRA |= (1 << ISC01); // INT0 - PD2 - falling edge - button
-	EICRA |= (1 << ISC10) | (1 << ISC11); // INT1 - PD3 - rising edge - encoder
-	EIMSK |= (1 << INT1) | (1 << INT0); // enable interrupts
-}
 
 int main(void)
 {
+	bool initStatus = true;
 	SPI_MasterInit(); // pin 10 CS, pin 11 MOSI, pin 13 SCLK
 	uart_init();
 	i2c_init();
 	adc_init();
-	timer_init();
 	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
-	encoderInit();
+	
+	// TODO: check status for all inits
+
+	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, onEncoderButtonShortPressEventCallback,
+							  onEncoderButtonLongPressEventCallBack, onEncoderRotaryEventCallback);
+	encoderEnableButtonIsr(true);
+	encoderEnableRotaryIsr(true);
+	uint16_t timerPeriod = 1;
+	initStatus &= applicationTimerInit(timerPeriod, onApplicationTimerEventCallback);
+
+	/* Led Init */
+	initStatus |= gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
+	// TODO: add watchdog to reboot device if we stuck here, or reset manualy.
+	while(!initStatus);
+
 	//set_sleep_mode(SLEEP_MODE_PWR_SAVE);
 	//sleep_enable();	/* Set SE (sleep enable bit) */
 	sei();
 	//ds1307_reset(); //do it after interrupts are enable
-	
-	/* Led Init */
-	DDRB |= 1 << DDB0; // pin 8 
-	PORTB &= ~(1 << DDB0); // logic 0.
 
 	/* read eeprom message size */
 	uint16_t size = eeprom_read_word(&eeprom_buff_size);
@@ -144,7 +126,7 @@ int main(void)
 	/* last index of main_buff array minus sizeof screen_buff - 1 because counting from 0 */
 	uint16_t last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 
-	timer_enable();
+	applicationTimerStart();
 
 	while(1) {
 
@@ -158,14 +140,23 @@ int main(void)
 		}
 
 		if (flags[UPDATE_CLOCK_HH] || flags[UPDATE_CLOCK_SS]) {
-			updateTime();
+			if (settingsEnabled || settingsApply)
+				updateTimeSettings();
+			else
+				updateTime();
 			flags[UPDATE_CLOCK_HH] = flags[UPDATE_CLOCK_SS] = false;
 		}
 
 		if (flags[UPDATE_TEMP]) {
 			/********** ONEWIRE START TEMP **********/
-			u_temp(counter);
+			u_temp(25);
 			flags[UPDATE_TEMP] = false;
+		}
+
+		if (flags[UPDATE_TEST]) {
+			/********** ONEWIRE START TEMP **********/
+			processTestMode();
+			flags[UPDATE_TEST] = false;
 		}
 
 		if (flags[EVENT_UART]) {
@@ -180,7 +171,7 @@ int main(void)
 				max7219_clear_panels(ALL);
 			
 			/* No interrupts can occur while this block is executed */
-			timer_disable();
+			applicationTimerStop();
 			ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 				/* calculate size of the new message */
 				uint16_t new_size = strsize(eeprom_update_buff);
@@ -199,75 +190,147 @@ int main(void)
 				last_indx = mess_len * 8 - LED_SIZE * LED_NUM - 1;
 				flags[EVENT_EEPROM] = false;
 			}
-			timer_enable();
+			applicationTimerStart();
 		}
 		//sleep_cpu();	/* Put MCU to sleep */
 		//sleep_disable();	/* Disable sleeps for safety */
 	}
 }
 
-/* 1ms interrupts */
-ISR(TIMER2_COMPA_vect)
+static void onApplicationTimerEventCallback(uint16_t timeStamp)
 {
-	timer++;
-	if (timer % timings[activeDisplayMode] == 0)
+	uint16_t timeTick = timeStamp;
+	if (timeTick % timings[activeDisplayMode] == 0)
 		flags[activeDisplayMode] = true;
 	
 	if (brightnessLevel == AUTO)
-		if (timer % timings[UPDATE_BRIGHTNESS] == 0)
+		if (timeTick % timings[UPDATE_BRIGHTNESS] == 0)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 }
 
-ISR(INT0_vect) // PD2 interrupt, button.
+static void onEncoderButtonShortPressEventCallback(void)
 {
-	static uint16_t buttonLastTick = 0;
-	uint16_t currentTick = timer;
-	if (currentTick - buttonLastTick > debounce) {
-		switch (activeDisplayMode) {
-		case DISPLAY_MODE_STRING:
-			activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
-			break;
-		case DISPLAY_MODE_CLOCK_HH:
+	switch (activeDisplayMode) {
+	case DISPLAY_MODE_STRING:
+		activeDisplayMode = DISPLAY_MODE_CLOCK_HH;
+		break;
+	case DISPLAY_MODE_CLOCK_HH:
+		if (settingsEnabled)
+			panelIndex += 2;
+		else
 			activeDisplayMode = DISPLAY_MODE_CLOCK_SS;
-			break;
-		case DISPLAY_MODE_CLOCK_SS:
+		break;
+	case DISPLAY_MODE_CLOCK_SS:
+		if (settingsEnabled)
+			panelIndex += 2; // index tells witch variable on witch panels to updade
+		else
 			activeDisplayMode = DISPLAY_MODE_TEMP;
-			break;
-		case DISPLAY_MODE_TEMP:
-		default:
-			activeDisplayMode = DISPLAY_MODE_STRING;
-			break;
-		}
+		break;
+	case DISPLAY_MODE_TEST:
+		activeDisplayMode = DISPLAY_MODE_CLOCK_HH; //DISPLAY_MODE_TEST;
+		break;
+	case DISPLAY_MODE_TEMP:
+	case DISPLAY_MODE_CANDLE:
+	default:
+		activeDisplayMode = DISPLAY_MODE_STRING;
+		break;
 	}
-	buttonLastTick = currentTick;
 }
 
-ISR(INT1_vect) // PD3 interrupt, encoder.
+static void onEncoderButtonLongPressEventCallBack(void)
 {
-	static uint16_t encoderLastTick = 0;
-	uint16_t currentTick = timer;
-	if(currentTick - encoderLastTick > debounce) {
-		if ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3))) {
-			if (counter != 0)
-				counter--;
-		} else {
-			if (counter != 99)
-				counter++;
-		}
+	if (!settingsEnabled) {
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_HIGH);
+		settingsEnabled = true;
+		encoderEnableRotaryIsr(true);
+	} else {
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_LOW);
+		settingsEnabled = false;
+		settingsApply = true;	
+		encoderEnableRotaryIsr(false);
 	}
-	encoderLastTick = currentTick;
+}
+
+static void onEncoderRotaryEventCallback(void)
+{
+	if (gpioPinGetState(PIN_4) && gpioPinGetState(PIN_3))
+		*encoderCounter = --(*encoderCounter) % 60;
+	else
+		*encoderCounter = ++(*encoderCounter) % 60;
+}
+
+static void sendFunc (uint8_t panelNumber, uint8_t value) 
+{
+	uint8_t num[8];
+	for (uint8_t j = 0; j < 8; j++) { // j - column number
+		num[j] = pgm_read_byte(&NUM_ARR[value][j]);
+	}
+	max7219_send_char_to(panelNumber, num);
+}
+
+static uint8_t value = 5;
+
+static void processTestMode()	// works, value change
+{
+	sendFunc(3, 8);
+	encoderCounter = &value;
+	sendFunc(0, *encoderCounter);
+	EIMSK |= (1 << INT1); // enable encoder interrupts
+}
+
+static void updateTimeSettings()
+{
+	static uint16_t period = 0;
+	period += timings[UPDATE_CLOCK_HH];
+	if (period < timings[UPDATE_SETTINGS])
+		return;
+	period = 0;
+
+	switch(activeDisplayMode) {
+		case DISPLAY_MODE_CLOCK_HH:
+			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.hh : &clock.mm;
+			break;
+		case DISPLAY_MODE_CLOCK_SS:
+			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.mm : &clock.ss;
+			break;
+		default:
+			break;
+	}
+	static uint8_t panelState = 0x01;
+	panelState ^= 0x01;
+
+	if (settingsApply) {
+		ds1307_set_hours(clock.hh);
+		ds1307_set_minutes(clock.mm);
+		ds1307_set_seconds(clock.ss);
+		encoderCounter = NULL;
+		settingsApply = false;
+		panelState = 0x01;
+		panelIndex = 0;
+		max7219_cmd_to(ALL, MAX7219_SHUTDOWN_REG, 0x01);
+		return;
+	}
+
+	static bool blinkDots = true; // blink dots every second
+	blinkDots = !blinkDots;
+
+	sendFunc(panelIndex, *encoderCounter / 10);
+	sendFunc(panelIndex + 1, *encoderCounter % 10);
+
+	max7219_cmd_to(panelIndex % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); // toggle panel state
+	max7219_cmd_to((panelIndex + 1) % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); 
 }
 
 /* update time on display */
 static void updateTime()
 {	
-	uint8_t curerntTick = ds1307_get_seconds();
-	if (clock.ss == curerntTick)
+	uint8_t currentTick = ds1307_get_seconds();
+	if (clock.ss == currentTick)
 		return;
-	clock.ss = curerntTick;
+	clock.ss = currentTick;
 	clock.mm = ds1307_get_minutes();
 	clock.hh = ds1307_get_hours();
-	
+
 	uint8_t clock_arr[4];
 
 	if (activeDisplayMode == DISPLAY_MODE_CLOCK_HH) {
@@ -282,7 +345,7 @@ static void updateTime()
 		clock_arr[3] = clock.ss % 10;
 	} 
 	
-	static bool blinkDots = true;
+	static bool blinkDots = true; // blink dots every second
 	blinkDots = !blinkDots;
 
 	for (uint8_t i = 0; i < LED_NUM; i++) { // i - panel number
@@ -308,15 +371,14 @@ static void updateTime()
 	}
 }
 
-
-static void u_temp(uint8_t t)
+static void u_temp(uint8_t tempValue)
 {
-	uint8_t t_arr[2] = {t / 10U, t % 10U};
+	uint8_t tempData[2] = {tempValue / 10U, tempValue % 10U};
 	uint8_t num[8];
 	/* send temp */
 	for (uint8_t i = 0; i < 2; i++) {
 		for (uint8_t j = 0; j < 8; j++) {
-			num[j] = pgm_read_byte(&NUM_ARR[t_arr[i]][j]);
+			num[j] = pgm_read_byte(&NUM_ARR[tempData[i]][j]);
 		}
 		max7219_send_char_to(i, num);
 	}
@@ -329,17 +391,17 @@ static void u_temp(uint8_t t)
 }
 
 
-static void u_photo(void)
-{
-	uint16_t ph = 0;
-	for (uint8_t i = 0; i < PHOTO_MEASURE_SAMPLES; i++)
-		ph += photo_avg[i];
-	ph /= PHOTO_MEASURE_SAMPLES;
-	/************************************************************************************/
-	// char photo[20];
-	// sprintf(photo, "photo = %u\n", ph / 17);
-	// uart_send(photo);
-	/************************************************************************************/
-	/* 255 / 17 == 15, 0 - 15 are all possible intensity levels */
-	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, ph / 17);
-}
+// static void u_photo(void)
+// {
+// 	uint16_t ph = 0;
+// 	for (uint8_t i = 0; i < PHOTO_MEASURE_SAMPLES; i++)
+// 		ph += photo_avg[i];
+// 	ph /= PHOTO_MEASURE_SAMPLES;
+// 	/************************************************************************************/
+// 	// char photo[20];
+// 	// sprintf(photo, "photo = %u\n", ph / 17);
+// 	// uart_send(photo);
+// 	/************************************************************************************/
+// 	/* 255 / 17 == 15, 0 - 15 are all possible intensity levels */
+// 	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, ph / 17);
+// }

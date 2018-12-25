@@ -1,3 +1,10 @@
+#ifdef __AVR__
+#include <avr/pgmspace.h>
+#else
+#define PROGMEM
+#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
+#endif
+
 #include <avr/io.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,7 +17,7 @@
 #include "MAX7219.h"
 #include "DS1307.h"
 
-extern volatile DISPLAY_MODE activeDisplayMode;
+static volatile DISPLAY_MODE activeDisplayMode; 				/* TODO: ADD GET FUNCTIONS */
 extern volatile bool flags[UPDATE_COUNT];
 extern uint8_t eeprom_update_buff[MAX_MESSAGE_ARR_SIZE];
 extern struct RTC_DATA clock;
@@ -72,6 +79,9 @@ void concat(uint8_t *arr, uint16_t arr_size)
 	strcpy((char *) arr, (char *) buff);
 }
 
+// TODO: add enum event parceCommand(uint8_t cmd[], uint16_t len), 
+// will return event enum, refactor  bool processCommand(commandEvent); 
+// return command status into uart after cmd execution
 
 void process_command(void)
 {

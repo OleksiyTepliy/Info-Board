@@ -1,28 +1,13 @@
-#ifndef F_CPU
-#define F_CPU   16000000UL
-#endif
-
-#ifdef __AVR__
-#include <avr/pgmspace.h>
-#else
-#define PROGMEM
-#define pgm_read_byte(addr) ({uint8_t byte__ = *(addr); byte__; }) 
-#endif
-
 #define OFFSET 32U // 32 - offset of ascii array
-
 /* max number of characters in message */
 #define MAX_MESSAGE_LEN 50U
-
 /* LED_NUM * 2 - padding spaces + one '\0' string terminator */
 #define MAX_MESSAGE_ARR_SIZE (MAX_MESSAGE_LEN + ((LED_NUM) << 1) + 1)
-
 /* how many times to measure resistor before brightness adjustment */
 /* measuring interval can be set in timings struct */
 #define PHOTO_MEASURE_SAMPLES 5U
 
-#define MOVE_TO_LEFT(num, pos) ((num) <<= (pos))
-#define MOVE_TO_RIGHT(num, pos) ((num) >>= (pos))
+// TODO: remove definitions from header file, make other modules independent from it
 
 /* display states */
 typedef enum DISPLAY_MODE {
@@ -35,7 +20,12 @@ typedef enum DISPLAY_MODE {
 	DISPLAY_MODE_MODES_COUNT
 } DISPLAY_MODE;
 
-/* event flags */
+typedef struct RTC_DATA {
+	uint8_t hh;
+	uint8_t mm;
+	uint8_t ss;
+} RTC_DATA;
+
 typedef enum EVENT_FLAGS {
 	EVENT_BRIGHTNESS,
 	EVENT_BATTERY,
@@ -53,21 +43,6 @@ typedef enum UPDATE_TIMINGS {
 	UPDATE_CANDLE,
 	UPDATE_TEST,
 	UPDATE_BRIGHTNESS,
+	UPDATE_SETTINGS,
 	UPDATE_COUNT
 } UPDATE_TIMINGS;
-
-/* brightness modes */
-typedef enum BRIGHTNESS_MODE {
-	MINIMAL = 0x00,
-	LOW = 0x04,
-	MEDIUM = 0x08,
-	HIGH = 0x12,
-	MAXIMAL = 0x15,
-	AUTO,
-} BRIGHTNESS_MODE;
-
-typedef struct RTC_DATA {
-	uint8_t hh;
-	uint8_t mm;
-	uint8_t ss;
-} RTC_DATA;
