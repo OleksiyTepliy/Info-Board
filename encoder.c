@@ -2,20 +2,25 @@
 #include <avr/interrupt.h>
 #include "gpio.h"
 #include "encoder.h"
+#include "applicationTimer.h"
+
+#define NULL (0)
+
+static encoderButtonCallback buttonCallback = NULL;
+static encoderRotaryCallback rotaryCallback = NULL;
 
 static bool isEncoderInited = false;
-static bool isEncoderCounterSet = false;
 static uint16_t *encoderCounter = 0;
 static uint8_t encoderDebunceTime = 0;
-static uint16_t timeTick = 0;
 
 bool encoderInit(GpioBoardPin encoderButton, GpioBoardPin channelA, GpioBoardPin channelB, 
-                 uint8_t debounceTime)
+                 encoderButtonCallback buttonCb, encoderRotaryCallback rotaryCb)
 {
     bool isEncoderInited = gpioPinInit(encoderButton, GPIO_PIN_INPUT, GPIO_PULL_UP_ENABLE);
     isEncoderInited &= gpioPinInit(channelA, GPIO_PIN_INPUT, GPIO_PULL_UP_ENABLE);
     isEncoderInited &= gpioPinInit(channelB, GPIO_PIN_INPUT, GPIO_PULL_UP_ENABLE);
-    isEncoderInited &= debounceTime ? (encoderDebunceTime = debounceTime) : false;
+    buttonCallback = buttonCb;
+    rotaryCallback = rotaryCb;
     return isEncoderInited;
 }
 
@@ -40,30 +45,16 @@ void encoderEnableButtonIsr(bool isrEnable)
         EIMSK &= ~(1 << INT0);
 }
 
-bool encoderSetCounter(uint16_t *valuePtr)
-{
-    if (isEncoderInited) {
-        encoderCounter = valuePtr;
-        return isEncoderCounterSet = true;
-    }
-    return isEncoderCounterSet = false;
-}
-
+// TODO: make callback from main
 ISR(INT1_vect) // PD3 interrupt, encoder.
 {
-	static uint16_t encoderLastTick = 0;
-	uint16_t currentTick = 1; //timeTick;
-    if (!isEncoderCounterSet)
-        return;
-							// TODO: debounce of encoder
-	if(currentTick - encoderLastTick > encoderDebunceTime) {
-        // ((PIND & (1 << PIND4)) && (PIND & (1 << PIND3)))
-		if (gpioPinGetState(PIN_4) && gpioPinGetState(PIN_3))
-			*encoderCounter = --(*encoderCounter) % 60;
-		else
-			*encoderCounter = ++(*encoderCounter) % 60;
-	}
-	encoderLastTick = currentTick;
+    if (rotaryCallback)
+        rotaryCallback();
 }
 
+ISR(INT0_vect) // PD2 interrupt, button.
+{
+    if (buttonCallback)
+        buttonCallback();
+}
 

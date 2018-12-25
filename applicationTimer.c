@@ -9,6 +9,7 @@
 static volatile uint16_t timeStamp = 0;
 static applicationTimerCallback timerCallBack = NULL;
 
+// TODO: add period value dependency
 bool applicationTimerInit(uint16_t timerPeriod, applicationTimerCallback Callback)
 {
     if (timerPeriod == 0 || Callback == NULL)
@@ -37,7 +38,7 @@ void applicationTimerDisable(void)
 	TCCR2B &= (~(1 << CS20) | ~(1 << CS22));
 }
 
-uint16_t applicationTimerGetTime(void)
+uint16_t applicationTimerGetTick(void)
 {
     uint16_t temp = 0;
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {

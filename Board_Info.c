@@ -30,10 +30,13 @@ volatile uint8_t photo_avg[PHOTO_MEASURE_SAMPLES] = {0};
 static volatile DISPLAY_MODE activeDisplayMode = DISPLAY_MODE_CLOCK_SS; // DISPLAY_MODE_TEST;
 static volatile bool settingsEnabled = false, settingsApply = false;
 volatile BRIGHTNESS_MODE brightnessLevel = MINIMAL;
-static uint16_t encoderCounter;
+static uint16_t *encoderCounter = NULL;
 static const uint16_t debounce = 40;
 static volatile uint8_t panelIndex = 0;
-static void timerCallback(uint16_t timeStamp);
+static void onApplicationtimerEventCallback(uint16_t timeStamp);
+static void onEncoderButtonEventCallback(void);
+static void onEncoderRotaryEventCallback(void);
+
 
 RTC_DATA clock = {
 	.hh = 0,
@@ -53,10 +56,6 @@ static uint16_t timings[UPDATE_COUNT] = {
 	[UPDATE_SETTINGS] = 300,
 };
 
-/**
- * u_screen - updates panels according to the mode flag.
- */
-static void u_screen();
 
 /**
  * u_time - updates time on display according to the mode flag.
@@ -70,11 +69,11 @@ static void updateTimeSettings();
  */
 static void u_temp(uint8_t t);
 
-/**
- * u_photo - adjust brightness of the panel.
- * 
- */
-static void u_photo(void);
+// /**
+//  * u_photo - adjust brightness of the panel.
+//  * 
+//  */
+// static void u_photo(void);
 
 static void processTestMode(void);
 
@@ -109,13 +108,15 @@ int main(void)
 	holdButtonTimerInit();
 	max7219_Init(brightnessLevel);
 	max7219_clear_panels(ALL);
+	
 	// TODO: check status for all inits
 
-	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, ENCODER_DEBOUNCE);
+	initStatus &= encoderInit(PIN_2, PIN_3, PIN_4, onEncoderButtonEventCallback,
+							  onEncoderRotaryEventCallback);
 	encoderEnableButtonIsr(true);
 	encoderEnableRotaryIsr(true);
 	uint16_t timerPeriod = 1;
-	initStatus &= applicationTimerInit(timerPeriod, timerCallback);
+	initStatus &= applicationTimerInit(timerPeriod, onApplicationtimerEventCallback);
 
 	/* Led Init */
 	initStatus |= gpioPinInit(PIN_8, GPIO_PIN_OUTPUT, GPIO_PIN_STATE_LOW);
@@ -225,7 +226,7 @@ int main(void)
 	}
 }
 
-static void timerCallback(uint16_t timeStamp)
+static void onApplicationtimerEventCallback(uint16_t timeStamp)
 {
 	uint16_t timeTick = timeStamp;
 	if (timeTick % timings[activeDisplayMode] == 0)
@@ -236,27 +237,11 @@ static void timerCallback(uint16_t timeStamp)
 			ADCSRA |= (1 << ADSC); // start photo conversion
 }
 
-ISR(TIMER1_COMPA_vect)
-{
-	holdButtonTimerStop();
-	holdEventHappend = true;
-	if (!settingsEnabled) {
-		gpioPinSetState(PIN_8, GPIO_PIN_STATE_HIGH);
-		settingsEnabled = true;
-		EIMSK |= (1 << INT1); // enable encoder interrupts
-	} else {
-		gpioPinSetState(PIN_8, GPIO_PIN_STATE_LOW);
-		settingsEnabled = false;
-		settingsApply = true;	
-		EIMSK &= ~(1 << INT1); // disable encoder interrupts
-	}
-}
-
-ISR(INT0_vect) // PD2 interrupt, button.
+static void onEncoderButtonEventCallback(void)
 {
 	static uint16_t buttonLastTick = 0;
-	uint16_t currentTick = timeTick;
-	uint8_t buttonPinState = PIND & (1 << PIND2);
+	uint16_t currentTick = applicationTimerGetTick();
+	bool buttonPinState = gpioPinGetState(PIN_2); //& (1 << PIND2);
 
 	if (!buttonPinState && currentTick - buttonLastTick > debounce) {
 		holdButtonTimerStart();
@@ -295,6 +280,38 @@ ISR(INT0_vect) // PD2 interrupt, button.
 	buttonLastTick = currentTick;
 }
 
+static void onEncoderRotaryEventCallback(void)
+{
+	static uint16_t encoderLastTick = 0;
+	uint16_t currentTick = applicationTimerGetTick(); //timeTick;
+								
+								// TODO: debounce of encoder
+
+	if(currentTick - encoderLastTick > ENCODER_DEBOUNCE) {
+		if (gpioPinGetState(PIN_4) && gpioPinGetState(PIN_3))
+			*encoderCounter = --(*encoderCounter) % 60;
+		else
+			*encoderCounter = ++(*encoderCounter) % 60;
+	}
+	encoderLastTick = currentTick;
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+	holdButtonTimerStop();
+	holdEventHappend = true;
+	if (!settingsEnabled) {
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_HIGH);
+		settingsEnabled = true;
+		encoderEnableRotaryIsr(true);
+	} else {
+		gpioPinSetState(PIN_8, GPIO_PIN_STATE_LOW);
+		settingsEnabled = false;
+		settingsApply = true;	
+		encoderEnableRotaryIsr(false);
+	}
+}
+
 static void sendFunc (uint8_t panelNumber, uint8_t value) {
 	uint8_t num[8];
 	for (uint8_t j = 0; j < 8; j++) { // j - column number
@@ -308,8 +325,8 @@ static uint8_t value = 5;
 static void processTestMode()	// works, value change
 {
 	sendFunc(3, 8);
-	encoderCounter = value;
-	sendFunc(0, encoderCounter);
+	encoderCounter = &value;
+	sendFunc(0, *encoderCounter);
 	EIMSK |= (1 << INT1); // enable encoder interrupts
 }
 
@@ -323,12 +340,10 @@ static void updateTimeSettings()
 
 	switch(activeDisplayMode) {
 		case DISPLAY_MODE_CLOCK_HH:
-			encoderCounter = (panelIndex % LED_NUM == 0) ? clock.hh : clock.mm;
-			encoderSetCounter(&encoderCounter);
+			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.hh : &clock.mm;
 			break;
 		case DISPLAY_MODE_CLOCK_SS:
-			encoderCounter = (panelIndex % LED_NUM == 0) ? clock.mm : clock.ss;
-			encoderSetCounter(&encoderCounter);
+			encoderCounter = (panelIndex % LED_NUM == 0) ? &clock.mm : &clock.ss;
 			break;
 		default:
 			break;
@@ -340,8 +355,7 @@ static void updateTimeSettings()
 		ds1307_set_hours(clock.hh);
 		ds1307_set_minutes(clock.mm);
 		ds1307_set_seconds(clock.ss);
-		encoderCounter = 0;
-		encoderSetCounter(NULL);
+		encoderCounter = NULL;
 		settingsApply = false;
 		panelState = 0x01;
 		panelIndex = 0;
@@ -352,8 +366,8 @@ static void updateTimeSettings()
 	static bool blinkDots = true; // blink dots every second
 	blinkDots = !blinkDots;
 
-	sendFunc(panelIndex, encoderCounter / 10);
-	sendFunc(panelIndex + 1, encoderCounter % 10);
+	sendFunc(panelIndex, *encoderCounter / 10);
+	sendFunc(panelIndex + 1, *encoderCounter % 10);
 
 	max7219_cmd_to(panelIndex % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); // toggle panel state
 	max7219_cmd_to((panelIndex + 1) % LED_NUM, MAX7219_SHUTDOWN_REG, panelState); 
@@ -429,17 +443,17 @@ static void u_temp(uint8_t tempValue)
 }
 
 
-static void u_photo(void)
-{
-	uint16_t ph = 0;
-	for (uint8_t i = 0; i < PHOTO_MEASURE_SAMPLES; i++)
-		ph += photo_avg[i];
-	ph /= PHOTO_MEASURE_SAMPLES;
-	/************************************************************************************/
-	// char photo[20];
-	// sprintf(photo, "photo = %u\n", ph / 17);
-	// uart_send(photo);
-	/************************************************************************************/
-	/* 255 / 17 == 15, 0 - 15 are all possible intensity levels */
-	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, ph / 17);
-}
+// static void u_photo(void)
+// {
+// 	uint16_t ph = 0;
+// 	for (uint8_t i = 0; i < PHOTO_MEASURE_SAMPLES; i++)
+// 		ph += photo_avg[i];
+// 	ph /= PHOTO_MEASURE_SAMPLES;
+// 	/************************************************************************************/
+// 	// char photo[20];
+// 	// sprintf(photo, "photo = %u\n", ph / 17);
+// 	// uart_send(photo);
+// 	/************************************************************************************/
+// 	/* 255 / 17 == 15, 0 - 15 are all possible intensity levels */
+// 	max7219_cmd_to(ALL, MAX7219_INTENSITY_REG, ph / 17);
+// }
